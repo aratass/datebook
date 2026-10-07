@@ -109,7 +109,7 @@ Only drafts of existing entries can be scheduled. For a brand new entry, set its
 
 ### Publishing on time
 
-Datebook publishes scheduled drafts with Craft's queue. While drafts are scheduled, a publish job runs at least every 15 minutes and at the minute a draft is due. Each job adds the next one, and Datebook makes sure these jobs do not pile up in the queue. Craft runs queue jobs while people use the control panel, so drafts can go live a little late on a quiet site.
+Datebook publishes scheduled drafts with Craft's queue. While drafts are scheduled, a publish job runs at least every 15 minutes and at the minute a draft is due. Each job adds the next one. Datebook looks in the queue before it adds a job, so these jobs do not pile up, even without a working cache. Publish jobs go ahead of other jobs in the queue. Craft runs queue jobs while people use the control panel, so drafts can go live a little late on a quiet site.
 
 For exact timing, run this command every minute with cron:
 
@@ -216,9 +216,9 @@ Datebook sends no data to its developer or to anyone else. Licensing is handled 
 
 ## Uninstalling
 
-Uninstalling removes Datebook's tables, so all schedules and feed links are deleted. Your drafts stay as normal drafts. Publish jobs that are still in the queue finish without doing anything.
+Uninstalling removes Datebook's tables, so all schedules and feed links are deleted. Your drafts stay as normal drafts. Datebook also takes its waiting publish jobs out of the queue, so none are left behind when you then delete the plugin's files with **Remove** in **Settings**, **Plugins**.
 
-While Datebook is disabled, scheduled drafts are not published. Drafts that became due in the meantime go live after you enable it again.
+While Datebook is disabled, scheduled drafts are not published. Publish jobs that run in the meantime finish without doing anything. Drafts that became due go live after you enable Datebook again.
 
 ## Support
 

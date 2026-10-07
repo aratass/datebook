@@ -7,12 +7,13 @@ use craft\db\Query;
 use craft\db\Table;
 use craft\queue\jobs\Proxy;
 use RuntimeException;
+use yii\base\NotSupportedException;
 use yii\queue\Queue;
 
 /**
  * Stands in for the queue on Craft Cloud. Craft passes every job on to it as a
  * proxy queue, and it sends them to Amazon SQS, which only accepts delays from
- * 0 to 900 seconds. Set $broken to make every push fail.
+ * 0 to 900 seconds and has no priorities. Set $broken to make every push fail.
  */
 final class SqsLikeQueue extends Queue
 {
@@ -25,6 +26,11 @@ final class SqsLikeQueue extends Queue
     {
         if ($this->broken) {
             throw new RuntimeException('The queue service is not available.');
+        }
+
+        // Like the SQS driver of yii2-queue. Craft then pushes the job again without one.
+        if ($priority) {
+            throw new NotSupportedException('Priority is not supported in this driver');
         }
 
         if ($delay > 900) {

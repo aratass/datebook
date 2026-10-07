@@ -31,8 +31,11 @@ it('schedules a draft and pushes a publish job that waits at most 15 minutes', f
         ->all();
 
     // The draft is due in two hours. The job comes back in 15 minutes and pushes the next one.
+    // It goes ahead of jobs with Craft's default priority.
     expect($jobs)->toHaveCount(1)
-        ->and((int)$jobs[0]['delay'])->toBe(Schedules::MAX_QUEUE_DELAY);
+        ->and((int)$jobs[0]['delay'])->toBe(Schedules::MAX_QUEUE_DELAY)
+        ->and((int)$jobs[0]['priority'])->toBe(Schedules::JOB_PRIORITY)
+        ->and(Schedules::JOB_PRIORITY)->toBeLessThan(1024);
 });
 
 it('pushes the publish job for the exact time when the draft is due within 15 minutes', function() {

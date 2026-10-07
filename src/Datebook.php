@@ -86,8 +86,9 @@ class Datebook extends Plugin
 
     protected function afterUninstall(): void
     {
-        // Jobs left in the queue do nothing now. A new install starts its own.
-        $this->schedules->forgetQueuedJobs();
+        // Craft cannot run the publish jobs once the plugin's files are removed, for
+        // example with Remove in Settings, Plugins. A new install starts its own.
+        $this->schedules->removeWaitingJobs();
 
         parent::afterUninstall();
     }

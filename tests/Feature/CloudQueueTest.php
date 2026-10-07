@@ -3,6 +3,7 @@
 use craft\db\Table;
 use craft\elements\Entry;
 use craft\helpers\Db;
+use yii\caching\DummyCache;
 use zemis\datebook\Datebook;
 use zemis\datebook\jobs\PublishDrafts;
 use zemis\datebook\records\ScheduleRecord;
@@ -204,6 +205,60 @@ it('does not fill the queue with jobs while nothing runs it', function() {
         datebookRunJobLater(900);
         expect($jobIds())->toHaveCount(1);
     });
+});
+
+it('keeps one publish job when the cache keeps nothing, as on Craft Cloud while Valkey is down', function() {
+    $sqs = new SqsLikeQueue();
+    $sqs->use(fn() => Fixtures::scheduledDraft(['title' => 'Weeks away'], '+20 days'));
+    expect(Fixtures::publishJobs())->toHaveCount(1);
+
+    $cache = Craft::$app->get('cache');
+    Craft::$app->set('cache', new DummyCache());
+
+    try {
+        $sqs->use(function() use ($sqs) {
+            $schedules = Fixtures::plugin()->schedules;
+
+            // Nothing remembers that a request checked a moment ago, so every request checks.
+            for ($i = 0; $i < 20; $i++) {
+                $schedules->queueDueDraftsIfNeeded();
+            }
+            expect(Fixtures::publishJobs())->toHaveCount(1)
+                ->and($sqs->delays)->toBe([900]);
+
+            // Each job pushes one next job, and the requests in between push none.
+            for ($i = 0; $i < 3; $i++) {
+                datebookRunJobLater(900);
+                $schedules->queueDueDraftsIfNeeded();
+                $schedules->queueDueDraftsIfNeeded();
+                expect(Fixtures::publishJobs())->toHaveCount(1);
+            }
+            expect($sqs->delays)->toBe([900, 900, 900, 900]);
+        });
+    } finally {
+        Craft::$app->set('cache', $cache);
+    }
+});
+
+it('pushes a new job at the next check when the queue service refused one', function() {
+    $editor = Fixtures::user('editor', Fixtures::editorPermissions());
+    $entry = Fixtures::entry('news', ['author' => $editor]);
+    $draft = Fixtures::draft($entry, $editor, ['title' => 'Refused at first']);
+    $sqs = new SqsLikeQueue(['broken' => true]);
+
+    $sqs->use(fn() => Fixtures::plugin()->schedules->schedule($draft, new DateTime('+2 hours'), $editor));
+
+    // Craft saved the job before the queue service refused it, so that job would never run.
+    expect(Fixtures::publishJobs())->toBeEmpty()
+        ->and($sqs->delays)->toBe([]);
+
+    // The queue service is back by the next check.
+    $sqs->broken = false;
+    Craft::$app->getCache()->delete('datebook:dueCheck');
+    $sqs->use(fn() => Fixtures::plugin()->schedules->queueDueDraftsIfNeeded());
+
+    expect($sqs->delays)->toBe([900])
+        ->and(Fixtures::publishJobs())->toHaveCount(1);
 });
 
 it('ends the chain when no draft is scheduled', function() {

@@ -15,7 +15,9 @@
 - A draft that was moved or unscheduled while drafts were being published stays a draft.
 - `php craft datebook/drafts/publish` and `php craft datebook/drafts/list` console commands.
 - Queue jobs that publish due drafts when nobody runs the console command. While drafts are scheduled, a job runs at least every 15 minutes and at the minute a draft is due. No job waits longer than 15 minutes, the longest delay Craft Cloud's queue accepts.
+- Publish jobs go ahead of other queue jobs. Datebook looks in the queue before it adds one, so they do not pile up, even without a working cache.
 - A problem with the queue never stops a schedule from being saved.
+- Uninstalling takes Datebook's waiting publish jobs out of the queue.
 - An "Upcoming content" dashboard widget for the next 14 days.
 - A private calendar feed (ICS) for each user, for Google Calendar, Outlook and Apple Calendar. The link can be reset at any time.
 - A "Feed link address" setting. In headless mode, feed links use the control panel's address.

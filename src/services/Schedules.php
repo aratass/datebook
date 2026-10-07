@@ -4,6 +4,7 @@ namespace zemis\datebook\services;
 
 use Craft;
 use craft\base\Element;
+use craft\db\Connection;
 use craft\db\Query;
 use craft\db\Table;
 use craft\elements\Entry;
@@ -13,12 +14,14 @@ use craft\helpers\DateTimeHelper;
 use craft\helpers\Db;
 use craft\helpers\ElementHelper;
 use craft\helpers\Queue;
+use craft\queue\Queue as CraftQueue;
 use craft\queue\QueueInterface;
 use craft\web\View;
 use DateTime;
 use DateTimeZone;
 use Throwable;
 use yii\base\Component;
+use yii\db\Expression;
 use yii\queue\Queue as BaseQueue;
 use yii\web\ForbiddenHttpException;
 use yii\web\NotFoundHttpException;
@@ -40,7 +43,9 @@ use zemis\datebook\web\assets\calendar\CalendarAsset;
  * by queue jobs. A job is never delayed by more than 15 minutes, because some
  * queues refuse longer delays. While drafts are scheduled, each job pushes the
  * next one, so a job runs at least every 15 minutes and at the minute a draft is due.
- * Only one such chain of jobs is kept: the job pushed last is remembered in the cache.
+ * Only one such chain of jobs is kept: before a job is pushed, Craft's queue table is
+ * checked for one that is waiting. The job pushed last is also remembered in the cache,
+ * which saves that check while the job is not due yet.
  */
 class Schedules extends Component
 {
@@ -55,6 +60,12 @@ class Schedules extends Component
      * queue runs on Amazon SQS, which refuses delays over 15 minutes.
      */
     public const MAX_QUEUE_DELAY = 900;
+
+    /**
+     * The priority publish jobs are pushed with. Craft runs jobs with a lower number first
+     * and gives most jobs 1024, so a due draft does not wait behind a long queue.
+     */
+    public const JOB_PRIORITY = 100;
 
     private const DUE_CHECK_CACHE_KEY = 'datebook:dueCheck';
     private const NEXT_JOB_CACHE_KEY = 'datebook:nextJob';
@@ -467,11 +478,12 @@ class Schedules extends Component
     /**
      * Makes sure a publish job runs by the given time.
      *
-     * The job is pushed with a delay of at most 15 minutes. Nothing is pushed while the
-     * job pushed last still waits and runs early enough, because each job pushes the
-     * next one (see [[queueNextCheck()]]). A job that still waits [[lateJobSeconds]]
-     * after its time is replaced, so publish jobs do not pile up while nothing runs
-     * the queue. Queue errors are logged, never thrown.
+     * The job is pushed with a delay of at most 15 minutes, ahead of other jobs (see
+     * [[JOB_PRIORITY]]). Nothing is pushed while a publish job waits in the queue and
+     * runs early enough, because each job pushes the next one (see [[queueNextCheck()]]).
+     * The queue itself is asked, so this also holds when the cache keeps nothing. A job
+     * that still waits [[lateJobSeconds]] after its time is replaced, so publish jobs do
+     * not pile up while nothing runs the queue. Queue errors are logged, never thrown.
      *
      * @return bool Whether a job is waiting to run by that time
      */
@@ -482,40 +494,55 @@ class Schedules extends Component
 
         try {
             $cache = Craft::$app->getCache();
-            $last = $cache->get(self::NEXT_JOB_CACHE_KEY);
-            $replaceId = null;
+            $last = self::toJob($cache->get(self::NEXT_JOB_CACHE_KEY));
 
-            if (is_array($last) && is_int($last['at'] ?? null) && $last['at'] <= $runAtTimestamp) {
-                $lastId = is_string($last['id'] ?? null) && $last['id'] !== '' ? $last['id'] : null;
-
-                // A job that is not due yet runs early enough, and it pushes the next one itself.
-                if ($last['at'] > $now) {
-                    return true;
-                }
-
-                // The job is due. While it waits for the queue to get to it, another one would
-                // only wait behind it. A job that is running, finished or failed does not count.
-                $status = $this->jobStatus($lastId);
-                $late = $now - $last['at'] >= $this->lateJobSeconds;
-                if (($status === BaseQueue::STATUS_WAITING || $status === null) && !$late) {
-                    return true;
-                }
-                if ($status === BaseQueue::STATUS_WAITING) {
-                    $replaceId = $lastId;
-                }
+            // A shortcut: the job pushed last is not due yet and runs early enough.
+            if ($last !== null && $last['at'] > $now && $last['at'] <= $runAtTimestamp) {
+                return true;
             }
 
-            $id = Queue::push(new PublishDrafts(), null, $runAtTimestamp - $now);
+            // The cache may have lost the job, or keep nothing at all, so ask the queue.
+            $waitingJobs = $this->findWaitingJobs();
+            $lateIds = [];
+
+            foreach ($waitingJobs ?? array_filter([$this->stillWaiting($last)]) as $job) {
+                if ($job['at'] > $runAtTimestamp) {
+                    break;
+                }
+
+                // A job that still waits long after its time, for example because nothing
+                // runs the queue, is replaced.
+                if ($now - $job['at'] >= $this->lateJobSeconds) {
+                    if ($job['id'] !== null) {
+                        $lateIds[] = $job['id'];
+                    }
+                    continue;
+                }
+
+                // This job runs early enough, and it pushes the next one itself. While it
+                // waits for the queue to get to it, another one would only wait behind it.
+                if ($job['at'] > $now) {
+                    $cache->set(self::NEXT_JOB_CACHE_KEY, $job, self::JOB_MEMORY_SECONDS);
+                }
+                $this->removeJobs($lateIds);
+
+                return true;
+            }
+
+            try {
+                $id = Queue::push(new PublishDrafts(), self::JOB_PRIORITY, $runAtTimestamp - $now);
+            } catch (Throwable $e) {
+                $this->removeUnsentJobs($waitingJobs);
+                throw $e;
+            }
             $cache->set(self::NEXT_JOB_CACHE_KEY, ['id' => $id, 'at' => $runAtTimestamp], self::JOB_MEMORY_SECONDS);
         } catch (Throwable $e) {
             Craft::warning("Could not add a job for scheduled drafts to the queue: {$e->getMessage()}", __METHOD__);
             return false;
         }
 
-        // The new job does everything the late one would have done.
-        if ($replaceId !== null) {
-            $this->removeJob($replaceId);
-        }
+        // The new job does everything the late ones would have done.
+        $this->removeJobs($lateIds);
 
         return true;
     }
@@ -545,9 +572,9 @@ class Schedules extends Component
     }
 
     /**
-     * Makes sure a publish job is waiting while drafts are scheduled. Runs at most once
-     * a minute, on web requests, so drafts still go out when a job was lost or the queue
-     * was cleared.
+     * Makes sure a publish job is waiting while drafts are scheduled. Runs on web
+     * requests, at most once a minute while the cache works, so drafts still go out
+     * when a job was lost or the queue was cleared.
      */
     public function queueDueDraftsIfNeeded(): void
     {
@@ -573,13 +600,144 @@ class Schedules extends Component
     }
 
     /**
-     * Forgets which publish job is waiting, so the next check pushes a new one.
+     * Forgets which publish job was pushed last, so the next check asks the queue.
      */
     public function forgetQueuedJobs(): void
     {
         $cache = Craft::$app->getCache();
         $cache->delete(self::NEXT_JOB_CACHE_KEY);
         $cache->delete(self::DUE_CHECK_CACHE_KEY);
+    }
+
+    /**
+     * Takes the publish jobs that wait in the queue out of it. Runs when Datebook is
+     * uninstalled, because Craft cannot run them once the plugin's files are removed.
+     * A job that is running already finishes on its own.
+     */
+    public function removeWaitingJobs(): void
+    {
+        try {
+            $jobs = $this->findWaitingJobs();
+            if ($jobs !== null) {
+                $ids = array_column($jobs, 'id');
+            } else {
+                // This queue cannot be searched. Take out the job pushed last, if it is known.
+                $last = self::toJob(Craft::$app->getCache()->get(self::NEXT_JOB_CACHE_KEY));
+                $ids = $last !== null && $last['id'] !== null ? [$last['id']] : [];
+            }
+
+            $this->removeJobs($ids);
+            $this->forgetQueuedJobs();
+        } catch (Throwable $e) {
+            Craft::warning("Could not remove the jobs for scheduled drafts from the queue: {$e->getMessage()}", __METHOD__);
+        }
+    }
+
+    /**
+     * Datebook's publish jobs that wait in Craft's queue table, the one that runs first
+     * first. Jobs that are running or failed do not count. Returns `null` when the queue
+     * keeps its jobs somewhere else or the table cannot be read.
+     *
+     * Craft keeps every job in this table, also when it hands the jobs on to a queue
+     * service, as on Craft Cloud. Publish jobs are found by their class name, which is
+     * part of the stored job, so they are found whatever language they were pushed in.
+     *
+     * @return array<int, array{id: string, at: int}>|null
+     */
+    private function findWaitingJobs(): ?array
+    {
+        $queue = Craft::$app->getQueue();
+        if (!$queue instanceof CraftQueue || !$queue->db instanceof Connection) {
+            return null;
+        }
+
+        $db = $queue->db;
+        $params = [':datebookJobClass' => bin2hex(PublishDrafts::class)];
+        $isPublishJob = $db->getIsPgsql()
+            ? new Expression("position(decode(:datebookJobClass, 'hex') in [[job]]) > 0", $params)
+            : new Expression('LOCATE(UNHEX(:datebookJobClass), [[job]]) > 0', $params);
+
+        try {
+            $rows = (new Query())
+                ->select(['id', 'timePushed', 'delay'])
+                ->from($queue->tableName)
+                ->where([
+                    // The application component ID, which Craft uses when no channel is set
+                    'channel' => $queue->channel ?? 'queue',
+                    'fail' => false,
+                    'timeUpdated' => null,
+                ])
+                ->andWhere($isPublishJob)
+                ->all($db);
+        } catch (Throwable $e) {
+            Craft::warning("Could not look for publish jobs in the queue: {$e->getMessage()}", __METHOD__);
+            return null;
+        }
+
+        $jobs = [];
+        foreach ($rows as $row) {
+            $jobs[] = ['id' => (string)$row['id'], 'at' => (int)$row['timePushed'] + (int)$row['delay']];
+        }
+        usort($jobs, fn(array $a, array $b) => [$a['at'], (int)$a['id']] <=> [$b['at'], (int)$b['id']]);
+
+        return $jobs;
+    }
+
+    /**
+     * For a queue without Craft's queue table: the job pushed last if it still waits.
+     * When the queue cannot tell, the job counts as waiting, but it is never taken out.
+     *
+     * @param array{id: string|null, at: int}|null $job
+     * @return array{id: string|null, at: int}|null
+     */
+    private function stillWaiting(?array $job): ?array
+    {
+        if ($job === null) {
+            return null;
+        }
+
+        $status = $this->jobStatus($job['id']);
+        if ($status === BaseQueue::STATUS_WAITING) {
+            return $job;
+        }
+
+        // A job that is running, finished or failed does not count.
+        return $status === null ? ['id' => null, 'at' => $job['at']] : null;
+    }
+
+    /**
+     * Takes out publish jobs that appeared in the queue table while a push failed.
+     *
+     * Craft saves a job in its table before it hands it on to a queue service such as
+     * Amazon SQS. When the hand-off fails, the saved job never runs, so it must not stop
+     * the next check from pushing a new one.
+     *
+     * @param array<int, array{id: string, at: int}>|null $before The jobs that waited before the push
+     */
+    private function removeUnsentJobs(?array $before): void
+    {
+        if ($before === null) {
+            return;
+        }
+
+        $newIds = array_diff(array_column($this->findWaitingJobs() ?? [], 'id'), array_column($before, 'id'));
+        $this->removeJobs(array_values($newIds));
+    }
+
+    /**
+     * Reads a job as remembered in the cache.
+     *
+     * @return array{id: string|null, at: int}|null
+     */
+    private static function toJob(mixed $value): ?array
+    {
+        if (!is_array($value) || !is_int($value['at'] ?? null)) {
+            return null;
+        }
+
+        $id = $value['id'] ?? null;
+
+        return ['id' => is_string($id) && $id !== '' ? $id : null, 'at' => $value['at']];
     }
 
     /**
@@ -600,19 +758,23 @@ class Schedules extends Component
     }
 
     /**
-     * Takes a publish job out of the queue.
+     * Takes publish jobs out of the queue.
+     *
+     * @param string[] $ids
      */
-    private function removeJob(string $id): void
+    private function removeJobs(array $ids): void
     {
         $queue = Craft::$app->getQueue();
         if (!$queue instanceof QueueInterface) {
             return;
         }
 
-        try {
-            $queue->release($id);
-        } catch (Throwable $e) {
-            Craft::warning("Could not remove job $id from the queue: {$e->getMessage()}", __METHOD__);
+        foreach ($ids as $id) {
+            try {
+                $queue->release($id);
+            } catch (Throwable $e) {
+                Craft::warning("Could not remove job $id from the queue: {$e->getMessage()}", __METHOD__);
+            }
         }
     }
 

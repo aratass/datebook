@@ -18,6 +18,7 @@ use markhuot\craftpest\test\RefreshesDatabase;
 use markhuot\craftpest\test\TestCase;
 
 require_once __DIR__ . '/Support/Fixtures.php';
+require_once __DIR__ . '/Support/OtherJob.php';
 require_once __DIR__ . '/Support/OutputCapture.php';
 require_once __DIR__ . '/Support/SqsLikeQueue.php';
 

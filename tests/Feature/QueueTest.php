@@ -4,10 +4,13 @@ use craft\db\Query;
 use craft\db\Table;
 use craft\elements\Entry;
 use craft\helpers\Db;
+use craft\helpers\Queue as QueueHelper;
+use zemis\datebook\Datebook;
 use zemis\datebook\jobs\PublishDrafts;
 use zemis\datebook\records\ScheduleRecord;
 use zemis\datebook\services\Schedules;
 use zemis\datebook\tests\Support\Fixtures;
+use zemis\datebook\tests\Support\OtherJob;
 
 beforeAll(fn() => Fixtures::boot());
 
@@ -90,6 +93,80 @@ it('replaces a due job that someone removed from the queue', function() {
         ->and((int)$jobs[0]['delay'])->toBe(0)
         ->and((string)$jobs[0]['id'])->not->toBe((string)$last['id']);
     $cache->delete('datebook:dueCheck');
+});
+
+it('finds its waiting job whatever language the job was pushed in', function() {
+    Fixtures::scheduledDraft();
+    // The job was pushed while the control panel was in German.
+    Db::update(Table::QUEUE, ['description' => 'Geplante Entwürfe veröffentlichen'], ['description' => 'Publishing scheduled drafts']);
+    $schedules = Fixtures::plugin()->schedules;
+    $schedules->forgetQueuedJobs();
+
+    $schedules->queueDueDraftsIfNeeded();
+
+    expect(Fixtures::publishJobs())->toBeEmpty()
+        ->and((int)(new Query())->from(Table::QUEUE)->where(['description' => 'Geplante Entwürfe veröffentlichen'])->count())->toBe(1);
+    Craft::$app->getCache()->delete('datebook:dueCheck');
+});
+
+it('lets a publish job that runs in time stand in for a late one', function() {
+    Fixtures::scheduledDraft([], '+2 hours');
+    Fixtures::scheduledDraft([], '+5 minutes');
+    [$late, $inTime] = Fixtures::publishJobs();
+    // The first job is long overdue, for example because nothing ever ran it.
+    Db::update(Table::QUEUE, ['timePushed' => time() - 2000], ['id' => $late['id']]);
+    $schedules = Fixtures::plugin()->schedules;
+    $schedules->forgetQueuedJobs();
+
+    $schedules->queueDueDraftsIfNeeded();
+
+    // No new job: the other one runs in time and does the work of both.
+    expect(array_column(Fixtures::publishJobs(), 'id'))->toBe([$inTime['id']]);
+    Craft::$app->getCache()->delete('datebook:dueCheck');
+});
+
+it('runs a publish job that replaced a late one before the jobs that came in meanwhile', function() {
+    // Only the jobs of this test are in the queue.
+    Db::delete(Table::QUEUE);
+    [$entry, $draft] = Fixtures::scheduledDraft(['title' => 'Busy queue'], '+10 minutes');
+
+    // More work comes in after the publish job, for example search index updates.
+    $otherIds = [];
+    for ($i = 0; $i < 3; $i++) {
+        $otherIds[] = QueueHelper::push(new OtherJob());
+    }
+
+    // 16 minutes later a long job still keeps the queue busy. The draft is due and its job
+    // is late, so the next check replaces the job.
+    ScheduleRecord::updateAll(['publishAt' => Db::prepareDateForDb(new DateTime('-6 minutes'))], ['draftId' => $draft->id]);
+    Db::update(Table::QUEUE, ['timePushed' => time() - 960], ['description' => 'Publishing scheduled drafts']);
+    $schedules = Fixtures::plugin()->schedules;
+    $schedules->forgetQueuedJobs();
+    $schedules->queueDueDraftsIfNeeded();
+    expect(Fixtures::publishJobs())->toHaveCount(1);
+
+    // Once the long job is done, the queue runs the new publish job first.
+    expect(Craft::$app->getQueue()->executeJob())->toBeTrue()
+        ->and(Entry::find()->id($entry->id)->status(null)->one()->title)->toBe('Busy queue')
+        ->and((int)(new Query())->from(Table::QUEUE)->where(['id' => $otherIds])->count())->toBe(3);
+    Craft::$app->getCache()->delete('datebook:dueCheck');
+});
+
+it('takes its waiting publish jobs out of the queue when it is uninstalled', function() {
+    Fixtures::scheduledDraft([], '+2 hours');
+    Fixtures::scheduledDraft([], '+5 minutes');
+    $otherId = QueueHelper::push(new OtherJob());
+    [$running, $waiting] = Fixtures::publishJobs();
+    // One publish job is running right now. It finishes on its own.
+    Db::update(Table::QUEUE, ['timeUpdated' => time(), 'dateReserved' => Db::prepareDateForDb(new DateTime())], ['id' => $running['id']]);
+
+    // Craft calls afterUninstall() once Datebook's tables are dropped. A real uninstall
+    // would also end the database transaction of the test, so only this step runs here.
+    (new ReflectionMethod(Datebook::class, 'afterUninstall'))->invoke(Fixtures::plugin());
+
+    expect(array_column(Fixtures::publishJobs(), 'id'))->toBe([$running['id']])
+        ->and((new Query())->from(Table::QUEUE)->where(['id' => $waiting['id']])->exists())->toBeFalse()
+        ->and((new Query())->from(Table::QUEUE)->where(['id' => $otherId])->exists())->toBeTrue();
 });
 
 it('does not push a job when no draft is scheduled', function() {

@@ -11,8 +11,8 @@ use zemis\datebook\Datebook;
  * Publishes every scheduled draft that is due.
  *
  * The job is safe to run any number of times. It is pushed with a delay of at most
- * 15 minutes. While drafts are still scheduled, it pushes the next job when it is
- * done, so later drafts are reached in steps.
+ * 15 minutes, ahead of other jobs. While drafts are still scheduled, it pushes the
+ * next job when it is done, so later drafts are reached in steps.
  */
 class PublishDrafts extends BaseJob
 {
