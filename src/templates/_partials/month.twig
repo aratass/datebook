@@ -1,0 +1,27 @@
+<div class="datebook-month" role="grid" aria-label="{{ rangeLabel }}">
+    <div class="datebook-month__head" role="row">
+        {% for name in weekdayNames %}
+            <div class="datebook-month__weekday" role="columnheader">{{ name }}</div>
+        {% endfor %}
+    </div>
+    {% for week in weeks %}
+        <div class="datebook-month__week" role="row">
+            {% for day in week %}
+                <div class="datebook-day{{ day.isToday ? ' is-today' }}{{ not day.inMonth ? ' is-outside' }}{{ day.isPast ? ' is-past' }}"
+                     role="gridcell" data-day="{{ day.date }}" aria-label="{{ day.label }}">
+                    <div class="datebook-day__head">
+                        <span class="datebook-day__num">{{ day.number }}</span>
+                    </div>
+                    <ul class="datebook-day__items" role="list">
+                        {% for item in day.items %}
+                            {% include 'datebook/_partials/item.twig' with {item: item, layout: 'month', timeZone: timeZone} only %}
+                        {% endfor %}
+                    </ul>
+                    <button type="button" class="datebook-more{{ day.items|length <= itemsPerDay ? ' hidden' }}" aria-expanded="false">
+                        {{ '{num} more'|t('datebook', {num: day.items|length - itemsPerDay}) }}
+                    </button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endfor %}
+</div>

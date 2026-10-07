@@ -1,0 +1,549 @@
+/* Datebook control panel styles. Colors come from Craft's CSS variables. */
+
+.datebook {
+  --datebook-line: var(--hairline-color, #e3e5e8);
+  --datebook-muted: var(--medium-text-color, #606d7b);
+  --datebook-light: var(--light-text-color, #8090a0);
+  --datebook-radius: var(--large-border-radius, 8px);
+  --datebook-accent: var(--link-color, #2563eb);
+}
+
+/* Toolbar */
+.datebook-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  width: 100%;
+}
+
+.datebook-range {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  min-width: 10em;
+}
+
+.datebook-toolbar .datebook-views {
+  margin-left: auto;
+}
+
+.datebook-views .btn.active {
+  background-color: var(--gray-200, #dfe5ec);
+  font-weight: 600;
+}
+
+/* Filters */
+.datebook-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin: 0 0 16px;
+}
+
+.datebook-filters .datebook-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.datebook-filters label {
+  color: var(--datebook-muted);
+  font-size: 12px;
+}
+
+.datebook-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.datebook-statuses__option {
+  display: inline-flex;
+  align-items: center;
+}
+
+.datebook-statuses__option label {
+  color: inherit;
+  font-size: 13px;
+}
+
+.datebook-notice {
+  margin: 0 0 12px;
+}
+
+/* Month view */
+.datebook-month,
+.datebook-weekgrid {
+  border: 1px solid var(--datebook-line);
+  border-radius: var(--datebook-radius);
+  overflow: hidden;
+  background: var(--white, #fff);
+}
+
+.datebook-month__head,
+.datebook-month__week,
+.datebook-weekgrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.datebook-month__weekday {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--datebook-line);
+  background: var(--gray-050, #f3f7fc);
+  color: var(--datebook-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.datebook-day {
+  container-type: inline-size;
+  position: relative;
+  min-height: 96px;
+  min-width: 0;
+  padding: 4px 5px 6px;
+  border-right: 1px solid var(--datebook-line);
+  border-bottom: 1px solid var(--datebook-line);
+  background: var(--white, #fff);
+  transition: background-color 0.1s ease;
+}
+
+.datebook-month__week > .datebook-day:last-child,
+.datebook-weekgrid > .datebook-day:last-child {
+  border-right: 0;
+}
+
+.datebook-month__week:last-child > .datebook-day,
+.datebook-weekgrid > .datebook-day {
+  border-bottom: 0;
+}
+
+.datebook-day.is-outside {
+  background: var(--gray-050, #f3f7fc);
+}
+
+.datebook-day.is-outside .datebook-day__num {
+  color: var(--datebook-light);
+}
+
+.datebook-day.is-drop-target {
+  background: var(--blue-050, #eff6ff);
+  box-shadow: inset 0 0 0 2px var(--blue-400, #60a5fa);
+}
+
+.datebook-day__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.datebook-day__name {
+  color: var(--datebook-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.datebook-day__num {
+  display: inline-block;
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+}
+
+.datebook-day.is-today .datebook-day__num {
+  padding: 0 4px;
+  background: var(--datebook-accent);
+  color: #fff;
+}
+
+.datebook-day__items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.datebook-month .datebook-day:not(.is-expanded) .datebook-item:nth-child(n + 5) {
+  display: none;
+}
+
+.datebook-more {
+  margin-top: 3px;
+  padding: 1px 4px;
+  border: 0;
+  background: none;
+  color: var(--datebook-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.datebook-more:hover {
+  text-decoration: underline;
+}
+
+/* Items */
+.datebook-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  border: 1px solid var(--gray-100, #e4edf6);
+  border-radius: 5px;
+  background: var(--gray-050, #f3f7fc);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.datebook-item.is-movable {
+  cursor: grab;
+}
+
+.datebook-item.is-dragging {
+  opacity: 0.4;
+}
+
+.datebook-item.is-saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.datebook-item__link {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 4px 3px 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.datebook-item__link:hover .datebook-item__title {
+  text-decoration: underline;
+}
+
+.datebook-item__time {
+  flex-shrink: 0;
+  color: var(--datebook-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.datebook-item__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.datebook-item__kind {
+  color: var(--datebook-muted);
+  font-weight: 600;
+}
+
+/* Month cells are narrow, so the text may take two lines there. */
+.datebook-month .datebook-item__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.datebook-item__menu {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 1px 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--datebook-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.datebook-item:hover .datebook-item__menu,
+.datebook-item__menu:focus,
+.datebook-item__menu:focus-visible {
+  opacity: 1;
+}
+
+.datebook-item__menu:hover {
+  background: var(--gray-100, #e4edf6);
+}
+
+.datebook-item--expiry {
+  border-style: dashed;
+  background: var(--white, #fff);
+}
+
+.datebook-item--expiry .datebook-item__kind {
+  color: var(--red-600, #dc2626);
+}
+
+.datebook-item--draft {
+  border-color: var(--blue-200, #bfdbfe);
+  background: var(--blue-050, #eff6ff);
+}
+
+.datebook-item--draft .datebook-item__kind {
+  color: var(--blue-600, #2563eb);
+}
+
+.datebook-item--failed {
+  border-color: var(--red-300, #fca5a5);
+  background: var(--red-050, #fef2f2);
+}
+
+.datebook-item--failed .datebook-item__kind {
+  color: var(--red-700, #b91c1c);
+}
+
+.datebook-item--disabled .datebook-item__title {
+  color: var(--datebook-light);
+}
+
+.datebook-item .status {
+  flex-shrink: 0;
+  margin: 3px 0 0;
+}
+
+/* Week view */
+.datebook-weekgrid .datebook-day {
+  min-height: 460px;
+}
+
+.datebook-weekgrid .datebook-day__head {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--datebook-line);
+}
+
+/* In the week view the time sits on its own line, the text wraps below it. */
+.datebook-weekgrid .datebook-item__link {
+  flex-wrap: wrap;
+  row-gap: 1px;
+}
+
+.datebook-weekgrid .datebook-item__text {
+  flex-basis: 100%;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.datebook-item__section {
+  display: block;
+  color: var(--datebook-light);
+  font-size: 11px;
+}
+
+/* List view */
+.datebook-list table.data tr.datebook-list__heading th {
+  padding-top: 18px;
+  border-bottom: 1px solid var(--datebook-line);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.datebook-list__day.is-today tr.datebook-list__heading th {
+  color: var(--datebook-accent);
+}
+
+.datebook-list table.data td.datebook-list__status {
+  white-space: nowrap;
+}
+
+.datebook-list table.data td.datebook-list__time {
+  width: 80px;
+  color: var(--datebook-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.datebook-list table.data td.datebook-list__kind {
+  width: 140px;
+  white-space: nowrap;
+}
+
+.datebook-empty {
+  padding: 32px 16px;
+  border: 1px dashed var(--datebook-line);
+  border-radius: var(--datebook-radius);
+  color: var(--datebook-muted);
+  text-align: center;
+}
+
+/* HUD */
+.datebook-hud {
+  max-width: 340px;
+}
+
+.datebook-hud--feed {
+  max-width: 460px;
+}
+
+.datebook-hud__kind {
+  margin: 0;
+  color: var(--datebook-muted, #606d7b);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.datebook-hud__title {
+  margin: 2px 0 8px;
+  font-size: 16px;
+  overflow-wrap: break-word;
+}
+
+.datebook-hud__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 10px;
+}
+
+.datebook-hud__meta dt {
+  color: var(--medium-text-color, #606d7b);
+}
+
+.datebook-hud__meta dd {
+  margin: 0;
+}
+
+.datebook-hud__tz,
+.datebook-hud__note {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.datebook-hud__buttons {
+  margin-top: 12px;
+}
+
+/* Dashboard widget */
+.datebook-widget__day + .datebook-widget__day {
+  margin-top: 12px;
+}
+
+.datebook-widget__day h3 {
+  margin: 0 0 4px;
+  color: var(--medium-text-color, #606d7b);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.datebook-widget__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.datebook-widget__list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.datebook-widget__time {
+  flex-shrink: 0;
+  min-width: 3.5em;
+  color: var(--medium-text-color, #606d7b);
+  font-variant-numeric: tabular-nums;
+}
+
+.datebook-widget__kind {
+  flex-shrink: 0;
+  color: var(--medium-text-color, #606d7b);
+  font-size: 11px;
+}
+
+.datebook-widget__footer {
+  margin-top: 12px;
+}
+
+/* Draft sidebar panel */
+.datebook-schedule > .input {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.datebook-schedule .datebook-schedule__status {
+  margin: 0;
+}
+
+.datebook-schedule .datebook-schedule__tz {
+  margin: 0;
+  color: var(--light-text-color, #8090a0);
+  font-size: 12px;
+}
+
+.datebook-schedule .datebook-schedule__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Narrow day cells drop the time; it stays in the details popup and the list view. */
+@container (max-width: 180px) {
+  .datebook-item__time {
+    display: none;
+  }
+
+  .datebook-weekgrid .datebook-item__time {
+    display: inline;
+  }
+}
+
+@media (max-width: 700px) {
+  .datebook-month__head {
+    display: none;
+  }
+
+  .datebook-month__week,
+  .datebook-weekgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .datebook-day,
+  .datebook-weekgrid .datebook-day {
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--datebook-line);
+  }
+
+  .datebook-day.is-outside {
+    display: none;
+  }
+
+  .datebook-item__time {
+    display: inline;
+  }
+
+  .datebook-toolbar .datebook-views {
+    margin-left: 0;
+  }
+}

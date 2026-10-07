@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (PHP ${{ matrix.php }}, Craft ${{ matrix.craft }}, ${{ matrix.db }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '8.2', craft: latest, db: mysql }
+          - { php: '8.3', craft: latest, db: mysql }
+          # The lowest Craft version that composer.json allows.
+          - { php: '8.2', craft: lowest, db: mysql }
+          - { php: '8.3', craft: latest, db: pgsql }
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: datebook_test
+          MYSQL_USER: craft
+          MYSQL_PASSWORD: craft
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: craft
+          POSTGRES_PASSWORD: craft
+          POSTGRES_DB: datebook_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U craft -d datebook_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      CRAFT_APP_ID: datebook-test
+      CRAFT_ENVIRONMENT: dev
+      CRAFT_DEV_MODE: 'true'
+      CRAFT_SECURITY_KEY: datebook-ci-security-key
+      CRAFT_DB_DRIVER: ${{ matrix.db }}
+      CRAFT_DB_SERVER: 127.0.0.1
+      CRAFT_DB_PORT: ${{ matrix.db == 'pgsql' && '5432' || '3306' }}
+      CRAFT_DB_DATABASE: datebook_test
+      CRAFT_DB_USER: craft
+      CRAFT_DB_PASSWORD: craft
+      CRAFT_DB_SCHEMA: public
+      CRAFT_DB_TABLE_PREFIX: ''
+      PRIMARY_SITE_URL: http://localhost:8080/
+      CRAFT_ALLOW_SUPERUSER: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: bcmath, ctype, curl, dom, fileinfo, gd, iconv, intl, json, mbstring, openssl, pcre, pdo, pdo_mysql, pdo_pgsql, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Find the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ matrix.php }}-${{ matrix.craft }}-${{ hashFiles('composer.json', 'ci/project/composer.json') }}
+          restore-keys: composer-${{ runner.os }}-${{ matrix.php }}-${{ matrix.craft }}-
+
+      - name: Install the Craft test project
+        working-directory: ci/project
+        run: |
+          if [ "${{ matrix.craft }}" = "lowest" ]; then
+            lowest=$(php -r 'echo ltrim(json_decode(file_get_contents("../../composer.json"), true)["require"]["craftcms/cms"], "^");')
+            composer require "craftcms/cms:$lowest" --no-update --no-interaction
+          fi
+          composer update --no-interaction --no-progress --prefer-dist
+          composer show craftcms/cms | grep -E '^versions'
+
+      - name: Install Craft and the plugin from the command line
+        working-directory: ci/project
+        env:
+          CRAFT_DB_DATABASE: datebook_cli
+        run: |
+          if [ "${{ matrix.db }}" = "pgsql" ]; then
+            PGPASSWORD=craft psql -h 127.0.0.1 -U craft -d datebook_test -c 'CREATE DATABASE datebook_cli'
+          else
+            mysql -h 127.0.0.1 -uroot -proot -e "CREATE DATABASE datebook_cli; GRANT ALL ON datebook_cli.* TO 'craft'@'%';"
+          fi
+          php craft install --interactive=0 --email=admin@example.com --username=admin --password=ci-password-123 --siteName="Datebook CI" --siteUrl=http://localhost:8080 --language=en-US
+          php craft plugin/install datebook
+          php craft datebook/drafts/list
+          php craft datebook/drafts/publish
+          php craft plugin/uninstall datebook
+          php craft plugin/install datebook
+          # The tests start from their own empty database.
+          rm -rf config/project
+
+      - name: Run the tests
+        run: ci/run-tests.sh --ci
+
+      - name: Static analysis
+        run: php ci/project/vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
+      - name: Code style
+        if: matrix.php == '8.3' && matrix.craft == 'latest' && matrix.db == 'mysql'
+        run: php ci/project/vendor/bin/ecs check --no-progress-bar
+
+  approval:
+    name: Plugin Store checklist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict --no-check-publish
+
+      - name: Check the approval items
+        run: ci/check-approval.sh

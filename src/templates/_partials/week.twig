@@ -1,0 +1,15 @@
+<div class="datebook-weekgrid" role="grid" aria-label="{{ rangeLabel }}">
+    {% for day in days %}
+        <div class="datebook-day{{ day.isToday ? ' is-today' }}{{ day.isPast ? ' is-past' }}" role="gridcell" data-day="{{ day.date }}" aria-label="{{ day.label }}">
+            <div class="datebook-day__head">
+                <span class="datebook-day__name">{{ weekdayNames[loop.index0] }}</span>
+                <span class="datebook-day__num">{{ day.number }}</span>
+            </div>
+            <ul class="datebook-day__items" role="list">
+                {% for item in day.items %}
+                    {% include 'datebook/_partials/item.twig' with {item: item, layout: 'week', timeZone: timeZone} only %}
+                {% endfor %}
+            </ul>
+        </div>
+    {% endfor %}
+</div>

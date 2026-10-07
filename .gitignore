@@ -1,0 +1,18 @@
+# Test project: installed by Composer and created by Craft when the tests run.
+/ci/project/vendor
+/ci/project/composer.lock
+/ci/project/.env
+/ci/project/storage/*
+!/ci/project/storage/.gitkeep
+/ci/project/web/cpresources
+/ci/project/tests
+/ci/project/config/project
+/ci/project/config/license.key
+/ci/project/.phpunit.cache
+
+# Local tools
+/vendor
+/node_modules
+.DS_Store
+.idea
+.vscode

@@ -1,0 +1,58 @@
+{
+  "name": "zemis/datebook",
+  "description": "A content calendar for Craft CMS. See post dates, expiry dates and scheduled drafts in month, week and list views, drag entries to reschedule them, and publish drafts of live entries on time.",
+  "type": "craft-plugin",
+  "keywords": [
+    "craft",
+    "cms",
+    "craftcms",
+    "craft-plugin",
+    "calendar",
+    "content calendar",
+    "editorial calendar",
+    "scheduled drafts",
+    "scheduling",
+    "publishing",
+    "ics"
+  ],
+  "license": "proprietary",
+  "authors": [
+    {
+      "name": "Zemis",
+      "homepage": "https://github.com/aratass/datebook"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/aratass/datebook/issues?state=open",
+    "source": "https://github.com/aratass/datebook",
+    "docs": "https://github.com/aratass/datebook/blob/main/README.md",
+    "rss": "https://github.com/aratass/datebook/releases.atom"
+  },
+  "require": {
+    "php": "^8.2",
+    "craftcms/cms": "^5.5.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "zemis\\datebook\\": "src/"
+    }
+  },
+  "extra": {
+    "handle": "datebook",
+    "name": "Datebook",
+    "developer": "Zemis",
+    "documentationUrl": "https://github.com/aratass/datebook/blob/main/README.md",
+    "changelogUrl": "https://raw.githubusercontent.com/aratass/datebook/main/CHANGELOG.md",
+    "class": "zemis\\datebook\\Datebook"
+  },
+  "config": {
+    "sort-packages": true,
+    "platform": {
+      "php": "8.2"
+    },
+    "allow-plugins": {
+      "yiisoft/yii2-composer": true,
+      "craftcms/plugin-installer": true
+    }
+  }
+}

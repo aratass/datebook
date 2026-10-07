@@ -1,0 +1,24 @@
+{# @var days array<string, \zemis\datebook\models\CalendarItem[]> #}
+{% if days|length %}
+    {% for date, items in days %}
+        <div class="datebook-widget__day">
+            <h3>{{ date == today ? 'Today'|t('datebook') : labels[date] }}</h3>
+            <ul class="datebook-widget__list">
+                {% for item in items %}
+                    {% set statusClass = {scheduled: 'blue', failed: 'red'}[item.status] ?? item.status %}
+                    <li>
+                        <span class="datebook-widget__time">{{ item.getLocalDate(timeZone)|time('short') }}</span>
+                        <span class="status {{ statusClass }}" role="img" aria-label="{{ item.statusLabel }}"></span>
+                        <span>
+                            {% if item.kind != 'post' %}<span class="datebook-widget__kind">{{ item.kindLabel }}:</span>{% endif %}
+                            <a href="{{ item.cpEditUrl }}">{{ item.title }}</a>
+                        </span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endfor %}
+{% else %}
+    <p class="zilch small">{{ 'Nothing is scheduled for these days.'|t('datebook') }}</p>
+{% endif %}
+<p class="datebook-widget__footer"><a href="{{ calendarUrl }}">{{ 'Open the calendar'|t('datebook') }}</a></p>

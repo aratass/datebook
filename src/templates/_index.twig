@@ -1,0 +1,118 @@
+{% extends '_layouts/cp' %}
+{% import '_includes/forms' as forms %}
+
+{# @var site \craft\models\Site #}
+{% set title = 'Datebook'|t('datebook') %}
+{% set selectedSubnavItem = 'calendar' %}
+
+{% set viewLabels = {
+    month: 'Month'|t('datebook'),
+    week: 'Week'|t('datebook'),
+    list: 'List'|t('datebook'),
+} %}
+
+{% block actionButton %}
+    {% if canSubscribe %}
+        <button type="button" id="datebook-subscribe" class="btn" aria-haspopup="dialog">{{ 'Subscribe'|t('datebook') }}</button>
+    {% endif %}
+{% endblock %}
+
+{% block toolbar %}
+    <div class="datebook-toolbar">
+        <div class="btngroup" role="group" aria-label="{{ 'Navigation'|t('datebook') }}">
+            <a class="btn" href="{{ prevUrl }}" title="{{ 'Previous'|t('datebook') }}" aria-label="{{ 'Previous'|t('datebook') }}">&lsaquo;</a>
+            <a class="btn" href="{{ todayUrl }}">{{ 'Today'|t('datebook') }}</a>
+            <a class="btn" href="{{ nextUrl }}" title="{{ 'Next'|t('datebook') }}" aria-label="{{ 'Next'|t('datebook') }}">&rsaquo;</a>
+        </div>
+        <h2 class="datebook-range" aria-live="polite">{{ rangeLabel }}</h2>
+        <div class="btngroup datebook-views" role="group" aria-label="{{ 'View'|t('datebook') }}">
+            {% for key, label in viewLabels %}
+                <a class="btn{{ key == calendarView ? ' active' }}" href="{{ viewUrls[key] }}"{% if key == calendarView %} aria-current="page"{% endif %}>{{ label }}</a>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <form class="datebook-filters" method="get" action="{{ cpUrl('datebook') }}">
+        <input type="hidden" name="view" value="{{ calendarView }}">
+        <input type="hidden" name="date" value="{{ state.anchor|date('Y-m-d') }}">
+
+        {% if sites|length > 1 %}
+            <div class="datebook-filter">
+                <label for="datebook-site">{{ 'Site'|t('app') }}</label>
+                <div class="select">
+                    <select id="datebook-site" name="site">
+                        {% for s in sites %}
+                            <option value="{{ s.handle }}"{% if s.id == site.id %} selected{% endif %}>{{ s.name|t('site') }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="datebook-filter">
+            <label for="datebook-section">{{ 'Section'|t('app') }}</label>
+            <div class="select">
+                <select id="datebook-section" name="section">
+                    <option value="">{{ 'All sections'|t('datebook') }}</option>
+                    {% for section in sections %}
+                        <option value="{{ section.id }}"{% if state.section == section.id %} selected{% endif %}>{{ section.name|t('site') }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        {% if authorOptions|length %}
+            <div class="datebook-filter">
+                <label for="datebook-author">{{ 'Author'|t('app') }}</label>
+                <div class="select">
+                    <select id="datebook-author" name="author">
+                        <option value="">{{ 'All authors'|t('datebook') }}</option>
+                        {% for id, name in authorOptions %}
+                            <option value="{{ id }}"{% if state.author == id %} selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        {% endif %}
+
+        <fieldset class="datebook-statuses">
+            <legend class="visually-hidden">{{ 'Status'|t('app') }}</legend>
+            {% for key, label in statusOptions %}
+                <div class="datebook-statuses__option">
+                    {{ forms.checkbox({
+                        id: 'datebook-status-' ~ key,
+                        name: 'status[]',
+                        value: key,
+                        label: label,
+                        checked: key in state.statuses,
+                    }) }}
+                </div>
+            {% endfor %}
+            <div class="datebook-statuses__option">
+                {{ forms.checkbox({
+                    id: 'datebook-expiry',
+                    name: 'expiry',
+                    value: '1',
+                    label: 'Expiry dates'|t('datebook'),
+                    checked: state.expiry,
+                }) }}
+            </div>
+        </fieldset>
+
+        <button type="submit" class="btn datebook-filters__submit">{{ 'Apply'|t('datebook') }}</button>
+    </form>
+
+    {% if limitReached %}
+        <p class="warning datebook-notice">{{ 'Not every item is shown. Pick a section or an author to see all of them.'|t('datebook') }}</p>
+    {% endif %}
+
+    <div class="datebook" data-view="{{ calendarView }}" data-per-day="{{ itemsPerDay }}">
+        {% include 'datebook/_partials/' ~ calendarView ~ '.twig' %}
+    </div>
+
+    {% js %}
+        new Datebook.Calendar({{ jsConfig|json_encode|raw }});
+    {% endjs %}
+{% endblock %}

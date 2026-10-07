@@ -1,0 +1,39 @@
+{# @var item \zemis\datebook\models\CalendarItem #}
+{% set layout = layout ?? 'month' %}
+{% set local = item.getLocalDate(timeZone) %}
+{% set statusClass = {
+    scheduled: 'blue',
+    failed: 'red',
+}[item.status] ?? item.status %}
+<li class="datebook-item datebook-item--{{ item.kind }} datebook-item--{{ item.status }}{{ item.canReschedule ? ' is-movable' }}"
+    {% if item.canReschedule %}draggable="true"{% endif %}
+    data-key="{{ item.key }}"
+    data-kind="{{ item.kind }}"
+    data-kind-label="{{ item.kindLabel }}"
+    data-element-id="{{ item.elementId }}"
+    data-site-id="{{ item.siteId }}"
+    data-status="{{ item.status }}"
+    data-status-label="{{ item.statusLabel }}"
+    data-title="{{ item.title }}{{ item.draftName ? ' (' ~ item.draftName ~ ')' }}"
+    data-section="{{ item.sectionName }}"
+    data-author="{{ item.authorName }}"
+    data-url="{{ item.cpEditUrl }}"
+    data-error="{{ item.error }}"
+    data-day="{{ local|date('Y-m-d') }}"
+    data-local-date-time="{{ local|date('Y-m-d\\TH:i') }}"
+    data-sort="{{ local|date('Y-m-d\\TH:i:s') }}-{{ item.title|lower }}">
+    <a class="datebook-item__link" href="{{ item.cpEditUrl }}" title="{{ item.kindLabel }}: {{ item.title }}">
+        <span class="status {{ statusClass }}" role="img" aria-label="{{ item.statusLabel }}"></span>
+        <span class="datebook-item__time">{{ local|time('short') }}</span>
+        <span class="datebook-item__text">
+            {%- if item.kind != 'post' -%}
+                <span class="datebook-item__kind">{{ item.kind == 'expiry' ? 'Expires'|t('datebook') : 'Draft'|t('datebook') }}</span>{{ ' ' }}
+            {%- endif -%}
+            <span class="datebook-item__title">{{ item.title }}</span>
+            {%- if layout == 'week' and item.sectionName -%}
+                <span class="datebook-item__section">{{ item.sectionName }}{{ item.authorName ? ', ' ~ item.authorName }}</span>
+            {%- endif -%}
+        </span>
+    </a>
+    <button type="button" class="datebook-item__menu" aria-haspopup="dialog" aria-label="{{ 'Details for {title}'|t('datebook', {title: item.title}) }}">&hellip;</button>
+</li>

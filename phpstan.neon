@@ -1,0 +1,10 @@
+# Static analysis for the plugin. Run from the plugin root after installing the
+# Craft test project: php ci/project/vendor/bin/phpstan analyse
+includes:
+    - ci/project/vendor/craftcms/phpstan/phpstan.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+    tmpDir: ci/project/storage/runtime/phpstan

@@ -1,0 +1,41 @@
+{% set listDays = days|filter(day => day.items|length) %}
+{% if listDays|length %}
+    <div class="datebook-list">
+        <table class="data fullwidth">
+            <thead>
+                <tr>
+                    <th scope="col">{{ 'Time'|t('datebook') }}</th>
+                    <th scope="col">{{ 'What'|t('datebook') }}</th>
+                    <th scope="col">{{ 'Title'|t('app') }}</th>
+                    <th scope="col">{{ 'Section'|t('app') }}</th>
+                    <th scope="col">{{ 'Author'|t('app') }}</th>
+                    <th scope="col">{{ 'Status'|t('app') }}</th>
+                </tr>
+            </thead>
+            {% for day in listDays %}
+                <tbody class="datebook-list__day{{ day.isToday ? ' is-today' }}">
+                    <tr class="datebook-list__heading">
+                        <th scope="rowgroup" colspan="6">{{ day.label }}</th>
+                    </tr>
+                    {% for item in day.items %}
+                        {% set statusClass = {scheduled: 'blue', failed: 'red'}[item.status] ?? item.status %}
+                        <tr>
+                            <td class="datebook-list__time">{{ item.getLocalDate(timeZone)|time('short') }}</td>
+                            <td class="datebook-list__kind">{{ item.kindLabel }}</td>
+                            <th scope="row">
+                                <a href="{{ item.cpEditUrl }}">{{ item.title }}</a>
+                                {% if item.draftName %}<span class="light">({{ item.draftName }})</span>{% endif %}
+                                {% if item.error %}<p class="error">{{ item.error }}</p>{% endif %}
+                            </th>
+                            <td>{{ item.sectionName }}</td>
+                            <td>{{ item.authorName }}</td>
+                            <td class="datebook-list__status"><span class="status {{ statusClass }}" role="img" aria-label="{{ item.statusLabel }}"></span> {{ item.statusLabel }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            {% endfor %}
+        </table>
+    </div>
+{% else %}
+    <p class="datebook-empty">{{ 'Nothing is scheduled for this month.'|t('datebook') }}</p>
+{% endif %}

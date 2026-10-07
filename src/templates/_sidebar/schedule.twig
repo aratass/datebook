@@ -1,0 +1,27 @@
+{# Scheduling panel for drafts of live entries. The inputs have no name, so the entry form ignores them. #}
+{# @var draft \craft\elements\Entry #}
+{# @var schedule \zemis\datebook\models\Schedule|null #}
+<div id="{{ id }}" class="field datebook-schedule" data-draft-id="{{ draft.id }}" data-site-id="{{ draft.siteId }}">
+    <div class="heading">
+        <label class="h6" for="{{ id }}-input">{{ 'Publish this draft later'|t('datebook') }}</label>
+    </div>
+    <div class="input ltr">
+        {% if schedule and schedule.isFailed() %}
+            <p class="datebook-schedule__status error">{{ 'Not published: {error}'|t('datebook', {error: schedule.error}) }}</p>
+        {% elseif schedule %}
+            <p class="datebook-schedule__status">{{ 'Will be published on {date}.'|t('datebook', {date: schedule.publishAt|datetime('medium')}) }}</p>
+        {% else %}
+            <p class="datebook-schedule__status light">{{ 'Not scheduled.'|t('datebook') }}</p>
+        {% endif %}
+
+        {% if canEdit %}
+            <input type="datetime-local" id="{{ id }}-input" class="text fullwidth datebook-schedule__input"
+                   value="{{ publishAtLocal }}" min="{{ minLocal }}" step="60" autocomplete="off">
+            <p class="datebook-schedule__tz">{{ 'Time zone: {timeZone}'|t('datebook', {timeZone: timeZone}) }}</p>
+            <div class="datebook-schedule__buttons">
+                <button type="button" class="btn small submit datebook-schedule__save">{{ schedule ? 'Update schedule'|t('datebook') : 'Schedule'|t('datebook') }}</button>
+                <button type="button" class="btn small datebook-schedule__cancel{{ not schedule ? ' hidden' }}">{{ 'Unschedule'|t('datebook') }}</button>
+            </div>
+        {% endif %}
+    </div>
+</div>

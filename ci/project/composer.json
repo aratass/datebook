@@ -1,0 +1,39 @@
+{
+  "name": "zemis/datebook-test-project",
+  "description": "Craft CMS project used to test Datebook. The plugin is installed from the repository root.",
+  "type": "project",
+  "license": "proprietary",
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "require": {
+    "craftcms/cms": "^5.5.0",
+    "vlucas/phpdotenv": "^5.4.0",
+    "zemis/datebook": "*"
+  },
+  "require-dev": {
+    "craftcms/ecs": "dev-main",
+    "craftcms/phpstan": "dev-main",
+    "markhuot/craft-pest-core": "^3.2",
+    "phpstan/phpstan": "^2.1"
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../..",
+      "options": {
+        "symlink": true,
+        "versions": {
+          "zemis/datebook": "1.0.0"
+        }
+      }
+    }
+  ],
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {
+      "craftcms/plugin-installer": true,
+      "pestphp/pest-plugin": true,
+      "yiisoft/yii2-composer": true
+    }
+  }
+}

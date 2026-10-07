@@ -1,0 +1,95 @@
+{% import '_includes/forms' as forms %}
+{# @var settings \zemis\datebook\models\Settings #}
+
+{{ forms.checkboxSelectField({
+    label: 'Sections'|t('datebook'),
+    instructions: 'Which sections appear on the calendar. Singles only show scheduled drafts.'|t('datebook'),
+    id: 'sections',
+    name: 'sections',
+    options: sectionOptions,
+    values: settings.sections,
+    showAllOption: true,
+    errors: settings.getErrors('sections'),
+}) }}
+
+{{ forms.selectField({
+    label: 'Default view'|t('datebook'),
+    id: 'defaultView',
+    name: 'defaultView',
+    options: [
+        {label: 'Month'|t('datebook'), value: 'month'},
+        {label: 'Week'|t('datebook'), value: 'week'},
+        {label: 'List'|t('datebook'), value: 'list'},
+    ],
+    value: settings.defaultView,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Show expiry dates'|t('datebook'),
+    instructions: 'Whether expiry dates are shown by default. Users can still turn them on and off.'|t('datebook'),
+    id: 'showExpiryDates',
+    name: 'showExpiryDates',
+    on: settings.showExpiryDates,
+}) }}
+
+<hr>
+
+{{ forms.lightswitchField({
+    label: 'Calendar feeds'|t('datebook'),
+    instructions: 'Let users with permission create a private link to their calendar for Google Calendar, Outlook or Apple Calendar.'|t('datebook'),
+    id: 'enableFeeds',
+    name: 'enableFeeds',
+    on: settings.enableFeeds,
+}) }}
+
+{{ forms.textField({
+    label: 'Feed: days back'|t('datebook'),
+    instructions: 'How many past days the feed includes.'|t('datebook'),
+    id: 'feedPastDays',
+    name: 'feedPastDays',
+    type: 'number',
+    min: 0,
+    max: 366,
+    size: 5,
+    value: settings.feedPastDays,
+    errors: settings.getErrors('feedPastDays'),
+}) }}
+
+{{ forms.textField({
+    label: 'Feed: days ahead'|t('datebook'),
+    instructions: 'How many future days the feed includes.'|t('datebook'),
+    id: 'feedFutureDays',
+    name: 'feedFutureDays',
+    type: 'number',
+    min: 1,
+    max: 731,
+    size: 5,
+    value: settings.feedFutureDays,
+    errors: settings.getErrors('feedFutureDays'),
+}) }}
+
+<hr>
+
+{{ forms.lightswitchField({
+    label: 'Email when a scheduled draft is published'|t('datebook'),
+    instructions: 'Sends an email to the person who scheduled the draft and to its creator.'|t('datebook'),
+    id: 'notifyOnPublish',
+    name: 'notifyOnPublish',
+    on: settings.notifyOnPublish,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Email when a scheduled draft fails'|t('datebook'),
+    instructions: 'Sends an email with the reason, for example a required field that is empty.'|t('datebook'),
+    id: 'notifyOnFailure',
+    name: 'notifyOnFailure',
+    on: settings.notifyOnFailure,
+}) }}
+
+<p class="light">{{ 'You can edit the email texts in Utilities, System Messages.'|t('datebook') }}</p>
+
+<hr>
+
+<h2>{{ 'Publishing on time'|t('datebook') }}</h2>
+<p>{{ 'Scheduled drafts are published by a queue job. If nobody uses the control panel for a while, the job can start late. For exact timing, run this command every minute with cron:'|t('datebook') }}</p>
+<pre><code>php craft datebook/drafts/publish</code></pre>
