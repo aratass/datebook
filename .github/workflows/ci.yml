@@ -20,6 +20,7 @@ jobs:
         include:
           - { php: '8.2', craft: latest, db: mysql }
           - { php: '8.3', craft: latest, db: mysql }
+          - { php: '8.4', craft: latest, db: mysql }
           # The lowest Craft version that composer.json allows.
           - { php: '8.2', craft: lowest, db: mysql }
           - { php: '8.3', craft: latest, db: pgsql }

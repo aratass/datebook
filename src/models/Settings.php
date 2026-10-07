@@ -2,7 +2,9 @@
 
 namespace zemis\datebook\models;
 
+use Craft;
 use craft\base\Model;
+use craft\helpers\App;
 
 /**
  * Plugin settings.
@@ -31,6 +33,13 @@ class Settings extends Model
 
     /** @var int How many days ahead the calendar feed reaches. */
     public int $feedFutureDays = 180;
+
+    /**
+     * @var string Where feed links start, for example `https://cms.example.com`. Leave empty
+     * to use the primary site's URL, or the control panel's address in headless mode.
+     * Environment variables and aliases work.
+     */
+    public string $feedBaseUrl = '';
 
     /** @var bool Email the scheduler and the draft creator when a scheduled draft is published. */
     public bool $notifyOnPublish = false;
@@ -63,7 +72,22 @@ class Settings extends Model
             [['feedFutureDays'], 'integer', 'min' => 1, 'max' => 731],
             [['showExpiryDates', 'enableFeeds', 'notifyOnPublish', 'notifyOnFailure'], 'boolean'],
             [['sections'], 'validateSections'],
+            [['feedBaseUrl'], 'trim'],
+            [['feedBaseUrl'], 'validateFeedBaseUrl'],
         ];
+    }
+
+    public function validateFeedBaseUrl(string $attribute): void
+    {
+        $value = $this->$attribute;
+        if ($value === '') {
+            return;
+        }
+
+        $url = trim((string)App::parseEnv($value));
+        if (!preg_match('#^https?://[^/\s]+#i', $url)) {
+            $this->addError($attribute, Craft::t('datebook', 'Enter a full address that starts with https:// or http://.'));
+        }
     }
 
     public function validateSections(string $attribute): void

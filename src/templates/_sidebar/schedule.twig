@@ -3,7 +3,11 @@
 {# @var schedule \zemis\datebook\models\Schedule|null #}
 <div id="{{ id }}" class="field datebook-schedule" data-draft-id="{{ draft.id }}" data-site-id="{{ draft.siteId }}">
     <div class="heading">
-        <label class="h6" for="{{ id }}-input">{{ 'Publish this draft later'|t('datebook') }}</label>
+        {% if canEdit %}
+            <label class="h6" for="{{ id }}-input">{{ 'Publish this draft later'|t('datebook') }}</label>
+        {% else %}
+            <span class="h6">{{ 'Publish this draft later'|t('datebook') }}</span>
+        {% endif %}
     </div>
     <div class="input ltr">
         {% if schedule and schedule.isFailed() %}
@@ -22,6 +26,15 @@
                 <button type="button" class="btn small submit datebook-schedule__save">{{ schedule ? 'Update schedule'|t('datebook') : 'Schedule'|t('datebook') }}</button>
                 <button type="button" class="btn small datebook-schedule__cancel{{ not schedule ? ' hidden' }}">{{ 'Unschedule'|t('datebook') }}</button>
             </div>
+        {% else %}
+            {% if note %}
+                <p class="datebook-schedule__note light">{{ note }}</p>
+            {% endif %}
+            {% if canCancel %}
+                <div class="datebook-schedule__buttons">
+                    <button type="button" class="btn small datebook-schedule__cancel">{{ 'Unschedule'|t('datebook') }}</button>
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 </div>

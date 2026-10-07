@@ -27,7 +27,7 @@ Datebook puts your content on a calendar. See when entries go live, when they ex
 - Month, week and list views of entries by post date and expiry date.
 - Scheduled drafts on the day they will be published. Failed drafts show the reason.
 - Filters by site, section, author and status.
-- Weeks and times follow each user's own preferences and time zone.
+- Weeks start on each user's chosen day. On Craft 5.10 and later, times follow each user's own time zone.
 
 ## Reschedule by drag and drop
 

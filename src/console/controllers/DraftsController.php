@@ -27,11 +27,12 @@ class DraftsController extends Controller
         $counts = Datebook::getInstance()->schedules->publishDue();
 
         $this->line(sprintf(
-            'Published: %d. Failed: %d. Waiting for a lock: %d. Missing: %d.',
+            'Published: %d. Failed: %d. Waiting for a lock: %d. Missing: %d. Changed meanwhile: %d.',
             $counts['published'],
             $counts['failed'],
             $counts['retry'],
             $counts['missing'],
+            $counts['skipped'],
         ));
 
         if ($counts['failed'] > 0) {

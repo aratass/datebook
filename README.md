@@ -39,7 +39,7 @@ php craft plugin/install datebook
 
 1. Open **Datebook** in the control panel sidebar.
 2. Give your editors the permissions they need (see [Permissions](#permissions)).
-3. For drafts that go live at the exact minute, add the [cron job](#publishing-on-time).
+3. For drafts that go live at the exact minute, add the [cron job](#publishing-on-time). On Craft Cloud you can skip this step.
 
 ## The calendar
 
@@ -62,7 +62,7 @@ Switch between **Month**, **Week** and **List** in the top right. Use the arrows
 
 Filter by **site** (on multi-site installs), **section**, **author** and **status**, and turn **expiry dates** on or off. The filters are part of the page address, so you can bookmark a view or share it with a colleague.
 
-Weeks start on the day set in your account preferences. Dates and times are shown in your preferred time zone, or in the system time zone if you have not picked one.
+Weeks start on the day set in your account preferences. Dates and times are shown in the system time zone. On Craft 5.10 and later, they are shown in your own time zone if you picked one in your account preferences.
 
 ### Rescheduling
 
@@ -70,8 +70,10 @@ Drag an item to another day. Its time of day stays the same, even across a dayli
 
 - Moving a post date moves the day the entry goes live. Moving an expiry date moves the day it expires. Moving a scheduled draft moves the day it will be published.
 - The post date must stay before the expiry date.
-- Moving a live entry to a day after today hides it from your site until then. Datebook asks before it does that.
-- Moving a pending entry to a day before today makes it live right away. Datebook asks first here too.
+- Moving the post date of a live entry to a later time hides the entry from your site until then. Datebook asks before it does that.
+- Moving the post date of a pending entry to a time that has passed makes it live right away. Datebook asks first here too.
+- Moving the expiry date of a live entry to a time that has passed hides it right away. Moving the expiry date of an expired entry to a later time makes it live again. Datebook asks first in both cases.
+- These checks look at the date and the time, so a move within today is checked too.
 - Each move saves a new revision of the entry with the note "Rescheduled on the Datebook calendar."
 
 You can only move items you are allowed to save, in sites you are allowed to edit.
@@ -88,10 +90,15 @@ Scheduled drafts let you prepare changes to a live entry and publish them later,
 
 At that time, Datebook applies the draft to the live entry, just like pressing **Apply draft**. The new revision is credited to the person who scheduled the draft.
 
+If someone changed the live entry after the draft was made, those changes are kept. Datebook brings them into the draft first, the same way Craft does when you open the draft. Only what you changed in the draft replaces them.
+
+You can schedule drafts in the sections that are on the calendar (see the **Sections** setting). If you take a section off the calendar later, its scheduled drafts are still published on time, and you can still unschedule them in the draft sidebar.
+
 To change the time, edit it in the sidebar or drag the draft on the calendar. To cancel, press **Unschedule**.
 
 Before a draft goes live, Datebook checks that:
 
+- the draft is still scheduled for that time, so a draft you just moved or unscheduled stays a draft;
 - the person who scheduled it still exists, is active and may still publish it;
 - the live entry still exists;
 - the draft is valid in every site, with the same rules Craft uses for live content.
@@ -102,7 +109,7 @@ Only drafts of existing entries can be scheduled. For a brand new entry, set its
 
 ### Publishing on time
 
-When a draft is scheduled, Datebook adds a job to Craft's queue that becomes due at that time. Craft runs queue jobs while people use the control panel, so drafts can go live a little late on a quiet site.
+Datebook publishes scheduled drafts with Craft's queue. While drafts are scheduled, a publish job runs at least every 15 minutes and at the minute a draft is due. Each job adds the next one, and Datebook makes sure these jobs do not pile up in the queue. Craft runs queue jobs while people use the control panel, so drafts can go live a little late on a quiet site.
 
 For exact timing, run this command every minute with cron:
 
@@ -111,6 +118,10 @@ For exact timing, run this command every minute with cron:
 ```
 
 The command is safe to run as often as you like. A lock makes sure a draft is never published twice.
+
+#### Craft Cloud
+
+Craft Cloud runs queue jobs on its own, so you do not need cron there. Scheduled commands on Cloud run at most once an hour, so they are too slow for this anyway. Cloud's queue only accepts jobs that wait 15 minutes or less, and Datebook's jobs never wait longer than that.
 
 ### Console commands
 
@@ -144,6 +155,8 @@ Anyone with the link can see your feed. If you shared it by mistake, press **Res
 
 Calendar apps refresh subscribed calendars on their own schedule. Google Calendar can take several hours.
 
+Feed links start with the address of your primary site. In headless mode they start with the address of the control panel instead, because the site address belongs to your front end. In two cases you need to set **Feed link address** in the plugin settings: when calendar apps cannot reach that address, and when the control panel has a domain of its own (`cpTrigger` set to `null`). Use an address where Craft answers front-end requests, for example the one your GraphQL API uses.
+
 ## Email notices
 
 Datebook can email the person who scheduled a draft, and the person who created it:
@@ -162,6 +175,7 @@ Go to **Settings**, **Plugins**, **Datebook**, or create a `config/datebook.php`
 
 return [
     // Section UIDs to show on the calendar, or '*' for all.
+    // Drafts can only be scheduled in these sections.
     'sections' => '*',
     // The view that opens first: 'month', 'week' or 'list'.
     'defaultView' => 'month',
@@ -172,6 +186,9 @@ return [
     // How many days back (0 to 366) and ahead (1 to 731) the feed reaches.
     'feedPastDays' => 30,
     'feedFutureDays' => 180,
+    // Where feed links start. Leave it empty for the primary site's address,
+    // or the control panel's address in headless mode.
+    'feedBaseUrl' => '',
     // Emails about scheduled drafts.
     'notifyOnPublish' => false,
     'notifyOnFailure' => true,
@@ -199,7 +216,9 @@ Datebook sends no data to its developer or to anyone else. Licensing is handled 
 
 ## Uninstalling
 
-Uninstalling removes Datebook's tables, so all schedules and feed links are deleted. Your drafts stay as normal drafts.
+Uninstalling removes Datebook's tables, so all schedules and feed links are deleted. Your drafts stay as normal drafts. Publish jobs that are still in the queue finish without doing anything.
+
+While Datebook is disabled, scheduled drafts are not published. Drafts that became due in the meantime go live after you enable it again.
 
 ## Support
 

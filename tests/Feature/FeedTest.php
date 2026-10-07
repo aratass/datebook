@@ -1,6 +1,7 @@
 <?php
 
 use zemis\datebook\Datebook;
+use zemis\datebook\models\Settings;
 use zemis\datebook\records\FeedTokenRecord;
 use zemis\datebook\tests\Support\Fixtures;
 
@@ -195,3 +196,99 @@ it('writes the same UTC times whatever the system time zone is', function() {
         ->and($start($inTokyo))->toContain($expected)
         ->and(str_replace("\r\n ", '', $inTokyo))->toContain('SUMMARY:Goes live: Zone test');
 });
+
+/**
+ * Runs the callback with some general config settings changed.
+ *
+ * @param array<string, mixed> $changes
+ */
+function datebookWithConfig(array $changes, callable $callback): mixed
+{
+    $generalConfig = Craft::$app->getConfig()->getGeneral();
+    $original = [];
+    foreach ($changes as $name => $value) {
+        $original[$name] = $generalConfig->$name;
+        $generalConfig->$name = $value;
+    }
+
+    try {
+        return $callback();
+    } finally {
+        foreach ($original as $name => $value) {
+            $generalConfig->$name = $value;
+        }
+    }
+}
+
+it('builds feed links from the control panel address in headless mode', function() {
+    $editor = Fixtures::user('editor', Fixtures::editorPermissions());
+    $feeds = Fixtures::plugin()->feeds;
+
+    // The primary site points to a front end that Craft does not serve.
+    $url = datebookWithConfig(
+        ['headlessMode' => true, 'baseCpUrl' => 'https://cms.example.com/'],
+        fn() => $feeds->getFeedUrl($editor, true),
+    );
+
+    expect($url)->toBe('https://cms.example.com/datebook/feed/' . $feeds->getToken($editor) . '.ics');
+});
+
+it('serves the feed in headless mode', function() {
+    $editor = Fixtures::user('editor', Fixtures::editorPermissions());
+    $token = Fixtures::plugin()->feeds->resetToken($editor);
+
+    datebookWithConfig(['headlessMode' => true], function() use ($token) {
+        $response = $this->get("/datebook/feed/$token.ics")->assertOk();
+        expect($response->content)->toStartWith("BEGIN:VCALENDAR\r\n");
+    });
+});
+
+it('keeps the site address in headless mode when the control panel has no path of its own', function() {
+    $editor = Fixtures::user('editor', Fixtures::editorPermissions());
+    $feeds = Fixtures::plugin()->feeds;
+    $siteUrl = $feeds->getFeedUrl($editor, true);
+
+    // Every request to cms.example.com is a control panel request then, so the feed could not answer there.
+    $url = datebookWithConfig(
+        ['headlessMode' => true, 'baseCpUrl' => 'https://cms.example.com/', 'cpTrigger' => null],
+        fn() => $feeds->getFeedUrl($editor),
+    );
+
+    expect($url)->toBe($siteUrl)
+        ->and($url)->toStartWith(Fixtures::primarySite()->getBaseUrl() . 'datebook/feed/');
+});
+
+it('uses the feed link address from the settings', function() {
+    $editor = Fixtures::user('editor', Fixtures::editorPermissions());
+    $feeds = Fixtures::plugin()->feeds;
+    $token = $feeds->resetToken($editor);
+    $siteUrl = $feeds->urlForToken($token);
+    $settings = Fixtures::plugin()->getSettings();
+    putenv('DATEBOOK_TEST_FEED_URL=https://calendar.example.com/craft/');
+    $settings->feedBaseUrl = '$DATEBOOK_TEST_FEED_URL';
+
+    try {
+        expect($feeds->urlForToken($token))->toBe("https://calendar.example.com/craft/datebook/feed/$token.ics")
+            ->and(datebookWithConfig(['omitScriptNameInUrls' => false], fn() => $feeds->urlForToken($token)))
+            ->toBe('https://calendar.example.com/craft/index.php?p=' . rawurlencode("datebook/feed/$token.ics"));
+
+        // An environment variable that is not set in this environment is ignored.
+        $settings->feedBaseUrl = '$DATEBOOK_TEST_MISSING_URL';
+        expect($feeds->urlForToken($token))->toBe($siteUrl);
+    } finally {
+        $settings->feedBaseUrl = '';
+        putenv('DATEBOOK_TEST_FEED_URL');
+    }
+});
+
+it('only accepts a full address for feed links', function(string $value, bool $valid) {
+    $settings = new Settings(['feedBaseUrl' => $value]);
+
+    expect($settings->validate(['feedBaseUrl']))->toBe($valid);
+})->with([
+    'empty' => ['', true],
+    'https' => ['https://cms.example.com', true],
+    'http with a path' => ['http://example.com/craft/', true],
+    'no scheme' => ['cms.example.com', false],
+    'a path only' => ['/datebook', false],
+]);

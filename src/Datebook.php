@@ -75,13 +75,21 @@ class Datebook extends Plugin
         $this->registerDraftSidebar();
         $this->registerGarbageCollection();
 
-        // Make sure a publish job exists when drafts are due. The check is cheap and
-        // runs at most once a minute, so a missed or cleared queue job still gets picked up.
+        // Make sure a publish job is waiting while drafts are scheduled. The check is cheap
+        // and runs at most once a minute, so a lost or cleared queue job is replaced.
         Craft::$app->onInit(function() {
             if (!Craft::$app->getRequest()->getIsConsoleRequest()) {
                 $this->schedules->queueDueDraftsIfNeeded();
             }
         });
+    }
+
+    protected function afterUninstall(): void
+    {
+        // Jobs left in the queue do nothing now. A new install starts its own.
+        $this->schedules->forgetQueuedJobs();
+
+        parent::afterUninstall();
     }
 
     /**

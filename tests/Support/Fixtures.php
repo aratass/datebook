@@ -9,7 +9,9 @@ use craft\elements\Entry;
 use craft\elements\User;
 use craft\enums\CmsEdition;
 use craft\enums\PropagationMethod;
+use craft\fieldlayoutelements\CustomField;
 use craft\fieldlayoutelements\entries\EntryTitleField;
+use craft\fields\PlainText;
 use craft\helpers\Db;
 use craft\models\EntryType;
 use craft\models\FieldLayout;
@@ -130,6 +132,70 @@ final class Fixtures
         }
 
         return $section;
+    }
+
+    /**
+     * A section whose entries need a summary, a required plain text field. Safe to
+     * call more than once.
+     */
+    public static function summarySection(): Section
+    {
+        $section = Craft::$app->getEntries()->getSectionByHandle('features');
+        if ($section) {
+            return $section;
+        }
+
+        $fields = Craft::$app->getFields();
+        $field = $fields->getFieldByHandle('datebookSummary');
+        if (!$field) {
+            $field = new PlainText(['name' => 'Summary', 'handle' => 'datebookSummary']);
+            if (!$fields->saveField($field)) {
+                throw new RuntimeException('Could not save field: ' . implode(' ', $field->getFirstErrors()));
+            }
+        }
+
+        $entryType = Craft::$app->getEntries()->getEntryTypeByHandle('feature') ?? new EntryType([
+            'name' => 'Feature',
+            'handle' => 'feature',
+        ]);
+        $layout = new FieldLayout(['type' => Entry::class]);
+        $tab = new FieldLayoutTab(['name' => 'Content', 'layout' => $layout, 'sortOrder' => 1]);
+        $tab->setElements([
+            new EntryTitleField(['required' => true]),
+            new CustomField($field, ['required' => true]),
+        ]);
+        $layout->setTabs([$tab]);
+        $entryType->setFieldLayout($layout);
+        if (!Craft::$app->getEntries()->saveEntryType($entryType)) {
+            throw new RuntimeException('Could not save entry type: ' . implode(' ', $entryType->getFirstErrors()));
+        }
+
+        $section = self::section('features', 'Features', Section::TYPE_CHANNEL, $entryType);
+        self::forgetPermissionList();
+
+        return $section;
+    }
+
+    /**
+     * Craft remembers the list of all permissions for the whole process, and drops
+     * permissions that are not on it when they are saved. Sections made after the
+     * first test of a run are not on it until the list is built again.
+     */
+    private static function forgetPermissionList(): void
+    {
+        $service = Craft::$app->getUserPermissions();
+        if (method_exists($service, 'reset')) {
+            $service->reset();
+            return;
+        }
+
+        // Craft 5.8.12 and older have no reset(), so clear the remembered lists by hand.
+        $properties = ['_allPermissions' => null, '_allPermissionNames' => null, '_permissionsByGroupId' => [], '_permissionsByUserId' => []];
+        foreach ($properties as $name => $value) {
+            if (property_exists($service, $name)) {
+                (new \ReflectionProperty($service, $name))->setValue($service, $value);
+            }
+        }
     }
 
     public static function entryType(string $handle, string $name): EntryType
@@ -328,6 +394,20 @@ final class Fixtures
         $schedule = self::plugin()->schedules->schedule($draft, new DateTime($when), $editor);
 
         return [$entry, $draft, $schedule, $editor];
+    }
+
+    /**
+     * Datebook's publish jobs in Craft's queue table, oldest first.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function publishJobs(): array
+    {
+        return (new Query())
+            ->from(Table::QUEUE)
+            ->where(['description' => 'Publishing scheduled drafts'])
+            ->orderBy(['id' => SORT_ASC])
+            ->all();
     }
 
     /**

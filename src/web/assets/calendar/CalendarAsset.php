@@ -47,6 +47,8 @@ class CalendarAsset extends AssetBundle
                 'Show less',
                 'Status',
                 'This entry is live. Moving its post date into the future hides it until then. Continue?',
+                'This moves the expiry date into the future, so the entry goes live again if it is enabled. Continue?',
+                'This moves the expiry date into the past, so the entry is hidden from your site right away. Continue?',
                 'This moves the post date into the past, so the entry goes live now if it is enabled. Continue?',
                 'Time zone: {timeZone}',
                 'Update schedule',

@@ -45,6 +45,30 @@
     return template.content.firstElementChild;
   }
 
+  /**
+   * The current date and time in the time zone as `Y-m-d\TH:i`, the format of
+   * datetime-local inputs, so the two compare as text. Null if the browser cannot tell.
+   */
+  function nowIn(timeZone) {
+    try {
+      const parts = {};
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).formatToParts(new Date()).forEach((part) => {
+        parts[part.type] = part.value;
+      });
+      return parts.year + '-' + parts.month + '-' + parts.day + 'T' + parts.hour + ':' + parts.minute;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function copyText(input) {
     const value = input.value;
     if (navigator.clipboard && window.isSecureContext) {
@@ -167,8 +191,9 @@
         this.dragged = null;
         item.classList.remove('is-dragging');
 
+        // The item keeps its time of day on the new day.
         const day = cell.dataset.day;
-        if (day === item.dataset.day || !this.confirmMove(item, day)) {
+        if (day === item.dataset.day || !this.confirmMove(item, day + item.dataset.localDateTime.slice(10))) {
           return;
         }
 
@@ -181,16 +206,26 @@
       this.root.querySelectorAll('.is-drop-target').forEach((cell) => cell.classList.remove('is-drop-target'));
     }
 
-    confirmMove(item, day) {
-      if (item.dataset.kind !== 'post') {
-        return true;
-      }
-      const today = this.config.today;
-      if (item.dataset.status === 'live' && day > today) {
+    /**
+     * Asks before a move hides a live entry or makes an entry live right away.
+     * `target` is the new date and time as `Y-m-d\TH:i` in the calendar's time zone.
+     */
+    confirmMove(item, target) {
+      const now = nowIn(this.config.timeZone) || this.config.now;
+      const kind = item.dataset.kind;
+      const status = item.dataset.status;
+
+      if (kind === 'post' && status === 'live' && target > now) {
         return window.confirm(t('This entry is live. Moving its post date into the future hides it until then. Continue?'));
       }
-      if (item.dataset.status === 'pending' && day < today) {
+      if (kind === 'post' && status === 'pending' && target <= now) {
         return window.confirm(t('This moves the post date into the past, so the entry goes live now if it is enabled. Continue?'));
+      }
+      if (kind === 'expiry' && status === 'live' && target <= now) {
+        return window.confirm(t('This moves the expiry date into the past, so the entry is hidden from your site right away. Continue?'));
+      }
+      if (kind === 'expiry' && status === 'expired' && target > now) {
+        return window.confirm(t('This moves the expiry date into the future, so the entry goes live again if it is enabled. Continue?'));
       }
       return true;
     }
@@ -322,7 +357,7 @@
 
       if (save && input) {
         const submit = () => {
-          if (!input.value || !this.confirmMove(item, input.value.slice(0, 10))) {
+          if (!input.value || !this.confirmMove(item, input.value.slice(0, 16))) {
             return;
           }
           save.classList.add('loading');
@@ -475,7 +510,9 @@
       post('datebook/schedules/cancel', this.payload())
         .then((response) => {
           this.setStatus(response.data.statusText, false);
-          this.saveButton.textContent = t('Schedule');
+          if (this.saveButton) {
+            this.saveButton.textContent = t('Schedule');
+          }
           this.cancelButton.classList.add('hidden');
           if (this.input) {
             this.input.value = '';

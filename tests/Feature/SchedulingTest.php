@@ -13,26 +13,40 @@ use zemis\datebook\jobs\PublishDrafts;
 use zemis\datebook\models\CalendarItem;
 use zemis\datebook\models\CalendarQuery;
 use zemis\datebook\records\ScheduleRecord;
+use zemis\datebook\services\Schedules;
 use zemis\datebook\tests\Support\Fixtures;
 
 beforeAll(fn() => Fixtures::boot());
 
-it('schedules a draft and pushes a delayed publish job', function() {
+it('schedules a draft and pushes a publish job that waits at most 15 minutes', function() {
     [, $draft] = Fixtures::scheduledDraft();
 
     $record = ScheduleRecord::findOne(['draftId' => $draft->id]);
     expect($record)->not->toBeNull()
         ->and($record->status)->toBe(ScheduleRecord::STATUS_PENDING);
 
+    $jobs = (new Query())
+        ->from('{{%queue}}')
+        ->where(['description' => 'Publishing scheduled drafts'])
+        ->all();
+
+    // The draft is due in two hours. The job comes back in 15 minutes and pushes the next one.
+    expect($jobs)->toHaveCount(1)
+        ->and((int)$jobs[0]['delay'])->toBe(Schedules::MAX_QUEUE_DELAY);
+});
+
+it('pushes the publish job for the exact time when the draft is due within 15 minutes', function() {
+    [, , $schedule] = Fixtures::scheduledDraft([], '+10 minutes');
+
     $job = (new Query())
         ->from('{{%queue}}')
         ->where(['description' => 'Publishing scheduled drafts'])
-        ->orderBy(['id' => SORT_DESC])
         ->one();
 
-    expect($job)->not->toBeFalse()
-        ->and((int)$job['delay'])->toBeGreaterThan(7000)
-        ->and((int)$job['delay'])->toBeLessThanOrEqual(7200);
+    // The queue stamps the job a moment after the delay was worked out, so allow a second.
+    $availableAt = (int)$job['timePushed'] + (int)$job['delay'];
+    expect($availableAt)->toBeGreaterThanOrEqual($schedule->publishAt->getTimestamp())
+        ->and($availableAt)->toBeLessThanOrEqual($schedule->publishAt->getTimestamp() + 1);
 });
 
 it('publishes due drafts and removes the schedule', function() {

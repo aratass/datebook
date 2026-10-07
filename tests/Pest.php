@@ -19,6 +19,11 @@ use markhuot\craftpest\test\TestCase;
 
 require_once __DIR__ . '/Support/Fixtures.php';
 require_once __DIR__ . '/Support/OutputCapture.php';
+require_once __DIR__ . '/Support/SqsLikeQueue.php';
 
-uses(TestCase::class, RefreshesDatabase::class)->in('Feature');
+uses(TestCase::class, RefreshesDatabase::class)
+    // Queue rows are rolled back after each test, but the cache is not. Start every
+    // test without a remembered publish job, or no job would be pushed.
+    ->beforeEach(fn() => \zemis\datebook\Datebook::getInstance()?->schedules->forgetQueuedJobs())
+    ->in('Feature');
 uses(TestCase::class)->in('Unit');

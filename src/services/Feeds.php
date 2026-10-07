@@ -4,6 +4,7 @@ namespace zemis\datebook\services;
 
 use Craft;
 use craft\elements\User;
+use craft\helpers\App;
 use craft\helpers\DateTimeHelper;
 use craft\helpers\Db;
 use craft\helpers\UrlHelper;
@@ -46,9 +47,42 @@ class Feeds extends Component
 
     public function urlForToken(string $token): string
     {
+        $path = "datebook/feed/$token.ics";
+
+        $baseUrl = $this->getFeedBaseUrl();
+        if ($baseUrl !== null) {
+            return $this->joinUrl($baseUrl, $path);
+        }
+
         $primarySite = Craft::$app->getSites()->getPrimarySite();
 
-        return UrlHelper::siteUrl("datebook/feed/$token.ics", null, null, $primarySite->id);
+        return UrlHelper::siteUrl($path, null, null, $primarySite->id);
+    }
+
+    /**
+     * Where feed links start when that is not the primary site's URL: the
+     * `feedBaseUrl` setting, or the control panel's address in headless mode,
+     * because the site URL then belongs to a front end that Craft does not serve.
+     */
+    public function getFeedBaseUrl(): ?string
+    {
+        $setting = trim((string)App::parseEnv(Datebook::getInstance()->getSettings()->feedBaseUrl));
+        if (preg_match('#^https?://[^/\s]+#i', $setting)) {
+            return $setting;
+        }
+        if ($setting !== '') {
+            // For example an environment variable that is not set in this environment.
+            Craft::warning("The feed link address \"$setting\" is not a full URL, so it is ignored.", __METHOD__);
+        }
+
+        // Without a control panel trigger, every request to that address is a control
+        // panel request, and the feed route only works on site requests.
+        $generalConfig = Craft::$app->getConfig()->getGeneral();
+        if ($generalConfig->headlessMode && $generalConfig->cpTrigger) {
+            return UrlHelper::baseCpUrl();
+        }
+
+        return null;
     }
 
     /**
@@ -160,5 +194,24 @@ class Feeds extends Component
     private function hash(string $token): string
     {
         return hash('sha256', $token);
+    }
+
+    /**
+     * Adds a route path to a base URL, with `index.php` when Craft is set to show it.
+     */
+    private function joinUrl(string $baseUrl, string $path): string
+    {
+        $baseUrl = rtrim($baseUrl, '/');
+        $generalConfig = Craft::$app->getConfig()->getGeneral();
+
+        if ($generalConfig->omitScriptNameInUrls) {
+            return "$baseUrl/$path";
+        }
+
+        if ($generalConfig->usePathInfo || !$generalConfig->pathParam) {
+            return "$baseUrl/index.php/$path";
+        }
+
+        return "$baseUrl/index.php?" . http_build_query([$generalConfig->pathParam => $path]);
     }
 }

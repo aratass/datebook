@@ -19,7 +19,7 @@ it('does nothing the second time a due draft is published', function() {
     $second = $schedules->publishDue(new DateTime('+3 hours'));
 
     expect($first['published'])->toBe(1)
-        ->and($second)->toBe(['published' => 0, 'failed' => 0, 'retry' => 0, 'missing' => 0])
+        ->and($second)->toBe(['published' => 0, 'failed' => 0, 'retry' => 0, 'missing' => 0, 'skipped' => 0])
         ->and((new Query())->from(Table::REVISIONS)->where(['canonicalId' => $entry->id])->count())->toBe($revisions)
         ->and(Entry::find()->id($entry->id)->status(null)->one()->title)->toBe('Once')
         ->and(Entry::find()->drafts()->id($draft->id)->status(null)->exists())->toBeFalse();

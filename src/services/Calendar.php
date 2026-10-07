@@ -40,11 +40,10 @@ class Calendar extends Component
      */
     public function getSections(?User $user): array
     {
-        $allowedUids = Datebook::getInstance()->getSettings()->getSectionUids();
         $sections = [];
 
         foreach (Craft::$app->getEntries()->getAllSections() as $section) {
-            if ($allowedUids !== null && !in_array($section->uid, $allowedUids, true)) {
+            if (!$this->showsSection($section)) {
                 continue;
             }
             if ($user !== null && !$user->can("viewEntries:$section->uid")) {
@@ -54,6 +53,21 @@ class Calendar extends Component
         }
 
         return $sections;
+    }
+
+    /**
+     * Whether the plugin settings put the section on the calendar. Drafts can only
+     * be scheduled in these sections.
+     */
+    public function showsSection(?Section $section): bool
+    {
+        if ($section === null) {
+            return false;
+        }
+
+        $allowedUids = Datebook::getInstance()->getSettings()->getSectionUids();
+
+        return $allowedUids === null || in_array($section->uid, $allowedUids, true);
     }
 
     /**

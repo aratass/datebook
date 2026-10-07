@@ -3,7 +3,7 @@
 
 {{ forms.checkboxSelectField({
     label: 'Sections'|t('datebook'),
-    instructions: 'Which sections appear on the calendar. Singles only show scheduled drafts.'|t('datebook'),
+    instructions: 'Which sections appear on the calendar. Drafts can only be scheduled in these sections. Singles only show scheduled drafts.'|t('datebook'),
     id: 'sections',
     name: 'sections',
     options: sectionOptions,
@@ -68,6 +68,18 @@
     errors: settings.getErrors('feedFutureDays'),
 }) }}
 
+{{ forms.autosuggestField({
+    label: 'Feed link address'|t('datebook'),
+    instructions: 'Where feed links start. Leave it empty to use the address of the primary site. In headless mode, the address of the control panel is used instead. Set it when calendar apps cannot reach that address, or when the control panel has a domain of its own.'|t('datebook'),
+    id: 'feedBaseUrl',
+    name: 'feedBaseUrl',
+    suggestEnvVars: true,
+    suggestAliases: true,
+    placeholder: 'https://cms.example.com',
+    value: settings.feedBaseUrl,
+    errors: settings.getErrors('feedBaseUrl'),
+}) }}
+
 <hr>
 
 {{ forms.lightswitchField({
@@ -91,5 +103,6 @@
 <hr>
 
 <h2>{{ 'Publishing on time'|t('datebook') }}</h2>
-<p>{{ 'Scheduled drafts are published by a queue job. If nobody uses the control panel for a while, the job can start late. For exact timing, run this command every minute with cron:'|t('datebook') }}</p>
+<p>{{ 'Scheduled drafts are published by queue jobs. If nobody uses the control panel for a while, a job can start late. For exact timing, run this command every minute with cron:'|t('datebook') }}</p>
 <pre><code>php craft datebook/drafts/publish</code></pre>
+<p class="light">{{ 'On Craft Cloud you do not need cron. Cloud runs queue jobs on its own.'|t('datebook') }}</p>

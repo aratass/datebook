@@ -11,12 +11,15 @@ use craft\elements\User;
 use craft\errors\InvalidElementException;
 use craft\helpers\DateTimeHelper;
 use craft\helpers\Db;
+use craft\helpers\ElementHelper;
 use craft\helpers\Queue;
+use craft\queue\QueueInterface;
 use craft\web\View;
 use DateTime;
 use DateTimeZone;
 use Throwable;
 use yii\base\Component;
+use yii\queue\Queue as BaseQueue;
 use yii\web\ForbiddenHttpException;
 use yii\web\NotFoundHttpException;
 use zemis\datebook\Datebook;
@@ -33,8 +36,11 @@ use zemis\datebook\web\assets\calendar\CalendarAsset;
 /**
  * Scheduled drafts: drafts of live entries that are applied at a set time.
  *
- * Due drafts are published by the `datebook/drafts/publish` console command
- * or by a queue job that is pushed with a delay when a draft is scheduled.
+ * Due drafts are published by the `datebook/drafts/publish` console command or
+ * by queue jobs. A job is never delayed by more than 15 minutes, because some
+ * queues refuse longer delays. While drafts are scheduled, each job pushes the
+ * next one, so a job runs at least every 15 minutes and at the minute a draft is due.
+ * Only one such chain of jobs is kept: the job pushed last is remembered in the cache.
  */
 class Schedules extends Component
 {
@@ -42,12 +48,29 @@ class Schedules extends Component
     public const RESULT_FAILED = 'failed';
     public const RESULT_RETRY = 'retry';
     public const RESULT_MISSING = 'missing';
+    public const RESULT_SKIPPED = 'skipped';
+
+    /**
+     * The longest delay, in seconds, that a publish job is pushed with. Craft Cloud's
+     * queue runs on Amazon SQS, which refuses delays over 15 minutes.
+     */
+    public const MAX_QUEUE_DELAY = 900;
 
     private const DUE_CHECK_CACHE_KEY = 'datebook:dueCheck';
+    private const NEXT_JOB_CACHE_KEY = 'datebook:nextJob';
     private const PUBLISH_LOCK = 'datebook:publishDue';
+
+    /** How long the job pushed last is remembered, in seconds. */
+    private const JOB_MEMORY_SECONDS = 604800;
 
     /** Seconds before a draft can be scheduled, so it is not published while the user still sees the form. */
     public int $minimumLeadSeconds = 60;
+
+    /** Seconds before the next job when a due draft could not be published yet, for example because its entry was locked. */
+    public int $retryDelay = 60;
+
+    /** Seconds a job may still wait in the queue after its time before it is replaced by a new one. */
+    public int $lateJobSeconds = 300;
 
     public function getScheduleByDraftId(int $draftId): ?Schedule
     {
@@ -67,6 +90,10 @@ class Schedules extends Component
 
         if ($draft->getIsUnpublishedDraft()) {
             return Craft::t('datebook', 'This entry is not live yet. Set its post date instead.');
+        }
+
+        if (!Datebook::getInstance()->calendar->showsSection($draft->getSection())) {
+            return Craft::t('datebook', 'This section is not on the Datebook calendar.');
         }
 
         if (!$user->can(Datebook::PERMISSION_SCHEDULE_DRAFTS)) {
@@ -102,6 +129,17 @@ class Schedules extends Component
     }
 
     /**
+     * Whether the user may remove the draft's schedule. This also works in sections
+     * that were taken off the calendar after the draft was scheduled.
+     */
+    public function canUnschedule(Entry $draft, User $user): bool
+    {
+        return $user->can(Datebook::PERMISSION_SCHEDULE_DRAFTS)
+            && Datebook::getInstance()->calendar->canEditSite($user, (int)$draft->siteId)
+            && Craft::$app->getElements()->canSave($draft, $user);
+    }
+
+    /**
      * Schedules a draft to be published at the given time.
      *
      * @throws ScheduleException
@@ -117,23 +155,29 @@ class Schedules extends Component
             throw new ScheduleException(Craft::t('datebook', 'Choose a time at least one minute from now.'));
         }
 
-        $record = ScheduleRecord::findOne(['draftId' => $draft->id]) ?? new ScheduleRecord();
-        $record->draftId = (int)$draft->id;
-        $record->canonicalId = (int)$draft->getCanonicalId();
-        $record->siteId = (int)$draft->siteId;
-        $record->userId = (int)$user->id;
-        $record->publishAt = (string)Db::prepareDateForDb($publishAt);
-        $record->status = ScheduleRecord::STATUS_PENDING;
-        $record->error = null;
-        $record->attempts = 0;
+        $schedule = $this->withEntryLock($draft, function() use ($draft, $publishAt, $user): Schedule {
+            $record = ScheduleRecord::findOne(['draftId' => $draft->id]) ?? new ScheduleRecord();
+            $record->draftId = (int)$draft->id;
+            $record->canonicalId = (int)$draft->getCanonicalId();
+            $record->siteId = (int)$draft->siteId;
+            $record->userId = (int)$user->id;
+            $record->publishAt = (string)Db::prepareDateForDb($publishAt);
+            $record->status = ScheduleRecord::STATUS_PENDING;
+            $record->error = null;
+            $record->attempts = 0;
 
-        if (!$record->save()) {
-            throw new ScheduleException(implode(' ', $record->getFirstErrors()) ?: Craft::t('datebook', 'The schedule could not be saved.'));
-        }
+            if (!$record->save()) {
+                throw new ScheduleException(implode(' ', $record->getFirstErrors()) ?: Craft::t('datebook', 'The schedule could not be saved.'));
+            }
 
-        $this->pushJob($publishAt);
+            return Schedule::fromRecord($record);
+        });
 
-        return Schedule::fromRecord($record);
+        // A queue error never undoes the schedule. Jobs pushed later, and the console
+        // command, still find the draft.
+        $this->pushJob($schedule->publishAt);
+
+        return $schedule;
     }
 
     /**
@@ -143,20 +187,16 @@ class Schedules extends Component
      */
     public function unschedule(Entry $draft, User $user): bool
     {
-        $record = ScheduleRecord::findOne(['draftId' => $draft->id]);
-        if (!$record) {
+        if (!ScheduleRecord::find()->where(['draftId' => $draft->id])->exists()) {
             return false;
         }
 
-        if (
-            !$user->can(Datebook::PERMISSION_SCHEDULE_DRAFTS) ||
-            !Datebook::getInstance()->calendar->canEditSite($user, (int)$draft->siteId) ||
-            !Craft::$app->getElements()->canSave($draft, $user)
-        ) {
+        if (!$this->canUnschedule($draft, $user)) {
             throw new ScheduleException(Craft::t('datebook', 'You are not allowed to change this schedule.'));
         }
 
-        return (bool)$record->delete();
+        // The lock makes sure the draft is not being published at this very moment.
+        return $this->withEntryLock($draft, fn() => ScheduleRecord::deleteAll(['draftId' => $draft->id]) > 0);
     }
 
     /**
@@ -238,11 +278,18 @@ class Schedules extends Component
     /**
      * Publishes every draft that is due.
      *
-     * @return array{published: int, failed: int, retry: int, missing: int}
+     * @return array{published: int, failed: int, retry: int, missing: int, skipped: int}
      */
     public function publishDue(?DateTime $now = null): array
     {
-        $counts = [self::RESULT_PUBLISHED => 0, self::RESULT_FAILED => 0, self::RESULT_RETRY => 0, self::RESULT_MISSING => 0];
+        $now ??= DateTimeHelper::now();
+        $counts = [
+            self::RESULT_PUBLISHED => 0,
+            self::RESULT_FAILED => 0,
+            self::RESULT_RETRY => 0,
+            self::RESULT_MISSING => 0,
+            self::RESULT_SKIPPED => 0,
+        ];
         $mutex = Craft::$app->getMutex();
 
         if (!$mutex->acquire(self::PUBLISH_LOCK, 5)) {
@@ -252,11 +299,10 @@ class Schedules extends Component
 
         try {
             foreach ($this->getDueSchedules($now) as $schedule) {
-                $counts[$this->publish($schedule)]++;
+                $counts[$this->publish($schedule, $now)]++;
             }
         } finally {
             $mutex->release(self::PUBLISH_LOCK);
-            Craft::$app->getCache()->delete(self::DUE_CHECK_CACHE_KEY);
         }
 
         return $counts;
@@ -291,55 +337,105 @@ class Schedules extends Component
     }
 
     /**
+     * When the next pending draft is due, or `null` when no draft is waiting.
+     */
+    public function getNextPublishAt(): ?DateTime
+    {
+        $publishAt = ScheduleRecord::find()
+            ->select(['publishAt'])
+            ->where(['status' => ScheduleRecord::STATUS_PENDING])
+            ->orderBy(['publishAt' => SORT_ASC])
+            ->scalar();
+
+        if (!is_string($publishAt) || $publishAt === '') {
+            return null;
+        }
+
+        $date = DateTimeHelper::toDateTime($publishAt);
+
+        return $date instanceof DateTime ? $date : null;
+    }
+
+    /**
      * Applies one scheduled draft to its live entry.
      *
-     * Permissions are checked again for the user who scheduled the draft, because
-     * they may have changed since.
+     * The schedule is read again once the entry is locked, because it may have been
+     * removed or moved after the list of due drafts was made. Permissions are checked
+     * again for the user who scheduled the draft, because they may have changed since.
      *
+     * @param DateTime|null $now The time the draft must be due by
      * @return string One of the RESULT_* constants
      */
-    public function publish(Schedule $schedule): string
+    public function publish(Schedule $schedule, ?DateTime $now = null): string
     {
+        $now ??= DateTimeHelper::now();
+
         $draft = $this->findDraft($schedule->draftId, $schedule->siteId);
         if (!$draft) {
             ScheduleRecord::deleteAll(['id' => $schedule->id]);
             return self::RESULT_MISSING;
         }
 
-        $canonical = $draft->getCanonical(true);
-        if ($canonical->id === $draft->id || $canonical->trashed) {
-            return $this->fail($schedule, $draft, Craft::t('datebook', 'The live entry no longer exists.'));
-        }
-
-        $user = $schedule->userId ? User::find()->id($schedule->userId)->status(null)->one() : null;
-        if (!$user instanceof User) {
-            return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft no longer exists.'));
-        }
-        if ($user->getStatus() !== User::STATUS_ACTIVE) {
-            return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft is not active.'));
-        }
-
-        if (!$user->can(Datebook::PERMISSION_SCHEDULE_DRAFTS) || !$this->canPublish($draft, $user)) {
-            return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft is no longer allowed to publish it.'));
-        }
-
+        // The same lock Craft takes when someone applies a draft by hand.
         $lockKey = "element:$draft->canonicalId";
         $mutex = Craft::$app->getMutex();
         if (!$mutex->acquire($lockKey, 15)) {
-            ScheduleRecord::updateAll(['attempts' => $schedule->attempts + 1], ['id' => $schedule->id]);
+            ScheduleRecord::updateAllCounters(['attempts' => 1], ['id' => $schedule->id]);
             return self::RESULT_RETRY;
         }
 
         $userComponent = Craft::$app->getUser();
         $previousIdentity = $userComponent->getIdentity(false);
-        $draftName = Drafts::name($draft);
-        $creatorId = Drafts::creatorId($draft);
+        $draftName = '';
+        $creatorId = null;
 
         try {
+            // Someone may have unscheduled the draft, moved it to a later time, or published
+            // it while this process waited. Only publish what is still pending and due.
+            $current = $this->getScheduleByDraftId($schedule->draftId);
+            if (
+                $current === null ||
+                $current->status !== ScheduleRecord::STATUS_PENDING ||
+                $current->publishAt->getTimestamp() > $now->getTimestamp()
+            ) {
+                return self::RESULT_SKIPPED;
+            }
+            $schedule = $current;
+
+            // Load the draft again too, so the latest saved version goes live.
+            $draft = $this->findDraft($schedule->draftId, $schedule->siteId);
+            if (!$draft) {
+                ScheduleRecord::deleteAll(['id' => $schedule->id]);
+                return self::RESULT_MISSING;
+            }
+
+            $canonical = $draft->getCanonical(true);
+            if ($canonical->id === $draft->id || $canonical->trashed) {
+                return $this->fail($schedule, $draft, Craft::t('datebook', 'The live entry no longer exists.'));
+            }
+
+            $user = $schedule->userId ? User::find()->id($schedule->userId)->status(null)->one() : null;
+            if (!$user instanceof User) {
+                return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft no longer exists.'));
+            }
+            if ($user->getStatus() !== User::STATUS_ACTIVE) {
+                return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft is not active.'));
+            }
+            if (!$user->can(Datebook::PERMISSION_SCHEDULE_DRAFTS) || !$this->canPublish($draft, $user)) {
+                return $this->fail($schedule, $draft, Craft::t('datebook', 'The user who scheduled this draft is no longer allowed to publish it.'));
+            }
+
+            $draftName = Drafts::name($draft);
+            $creatorId = Drafts::creatorId($draft);
+
             // Act as the user who scheduled the draft, so the new revision is credited to them.
             $userComponent->setIdentity($user);
 
-            $errors = $this->validateDraft($draft);
+            // Check the draft with what changed on the live entry since it was made, as Craft
+            // does when someone opens the draft. Craft saves those changes into the draft when
+            // it applies it.
+            $merge = $draft::trackChanges() && ElementHelper::isOutdated($draft);
+            $errors = $this->validateDraft($draft, $merge);
             if ($errors !== null) {
                 return $this->fail($schedule, $draft, $errors);
             }
@@ -369,16 +465,89 @@ class Schedules extends Component
     }
 
     /**
-     * Pushes a publish job that becomes available at the given time.
+     * Makes sure a publish job runs by the given time.
+     *
+     * The job is pushed with a delay of at most 15 minutes. Nothing is pushed while the
+     * job pushed last still waits and runs early enough, because each job pushes the
+     * next one (see [[queueNextCheck()]]). A job that still waits [[lateJobSeconds]]
+     * after its time is replaced, so publish jobs do not pile up while nothing runs
+     * the queue. Queue errors are logged, never thrown.
+     *
+     * @return bool Whether a job is waiting to run by that time
      */
-    public function pushJob(DateTime $runAt): void
+    public function pushJob(DateTime $runAt): bool
     {
-        $delay = max(0, $runAt->getTimestamp() - time());
-        Queue::push(new PublishDrafts(), null, $delay);
+        $now = time();
+        $runAtTimestamp = max($now, min($runAt->getTimestamp(), $now + self::MAX_QUEUE_DELAY));
+
+        try {
+            $cache = Craft::$app->getCache();
+            $last = $cache->get(self::NEXT_JOB_CACHE_KEY);
+            $replaceId = null;
+
+            if (is_array($last) && is_int($last['at'] ?? null) && $last['at'] <= $runAtTimestamp) {
+                $lastId = is_string($last['id'] ?? null) && $last['id'] !== '' ? $last['id'] : null;
+
+                // A job that is not due yet runs early enough, and it pushes the next one itself.
+                if ($last['at'] > $now) {
+                    return true;
+                }
+
+                // The job is due. While it waits for the queue to get to it, another one would
+                // only wait behind it. A job that is running, finished or failed does not count.
+                $status = $this->jobStatus($lastId);
+                $late = $now - $last['at'] >= $this->lateJobSeconds;
+                if (($status === BaseQueue::STATUS_WAITING || $status === null) && !$late) {
+                    return true;
+                }
+                if ($status === BaseQueue::STATUS_WAITING) {
+                    $replaceId = $lastId;
+                }
+            }
+
+            $id = Queue::push(new PublishDrafts(), null, $runAtTimestamp - $now);
+            $cache->set(self::NEXT_JOB_CACHE_KEY, ['id' => $id, 'at' => $runAtTimestamp], self::JOB_MEMORY_SECONDS);
+        } catch (Throwable $e) {
+            Craft::warning("Could not add a job for scheduled drafts to the queue: {$e->getMessage()}", __METHOD__);
+            return false;
+        }
+
+        // The new job does everything the late one would have done.
+        if ($replaceId !== null) {
+            $this->removeJob($replaceId);
+        }
+
+        return true;
     }
 
     /**
-     * Pushes a publish job when drafts are due. Runs at most once a minute.
+     * Pushes the next publish job while drafts are scheduled: at the time the next draft
+     * is due, or in 15 minutes when that is later. Publish jobs call this when they finish.
+     */
+    public function queueNextCheck(): void
+    {
+        try {
+            $next = $this->getNextPublishAt();
+            if ($next === null) {
+                return;
+            }
+
+            $now = DateTimeHelper::now();
+            if ($next <= $now) {
+                // A due draft is still waiting, for example because its entry was locked.
+                $next = (clone $now)->modify("+$this->retryDelay seconds");
+            }
+
+            $this->pushJob($next);
+        } catch (Throwable $e) {
+            Craft::warning('Could not plan the next check for scheduled drafts: ' . $e->getMessage(), __METHOD__);
+        }
+    }
+
+    /**
+     * Makes sure a publish job is waiting while drafts are scheduled. Runs at most once
+     * a minute, on web requests, so drafts still go out when a job was lost or the queue
+     * was cleared.
      */
     public function queueDueDraftsIfNeeded(): void
     {
@@ -393,18 +562,57 @@ class Schedules extends Component
                 return;
             }
 
-            $hasDue = ScheduleRecord::find()
-                ->where(['status' => ScheduleRecord::STATUS_PENDING])
-                ->andWhere(['<=', 'publishAt', Db::prepareDateForDb(DateTimeHelper::now())])
-                ->exists();
-
-            if ($hasDue) {
-                Queue::push(new PublishDrafts());
-                // Do not push another job while this one waits in the queue.
-                $cache->set(self::DUE_CHECK_CACHE_KEY, 1, 300);
+            // A due draft gets a job that runs right away.
+            $next = $this->getNextPublishAt();
+            if ($next !== null) {
+                $this->pushJob($next);
             }
         } catch (Throwable $e) {
             Craft::warning('Could not check for due drafts: ' . $e->getMessage(), __METHOD__);
+        }
+    }
+
+    /**
+     * Forgets which publish job is waiting, so the next check pushes a new one.
+     */
+    public function forgetQueuedJobs(): void
+    {
+        $cache = Craft::$app->getCache();
+        $cache->delete(self::NEXT_JOB_CACHE_KEY);
+        $cache->delete(self::DUE_CHECK_CACHE_KEY);
+    }
+
+    /**
+     * The queue status of a job (one of the `STATUS_*` constants of the queue), or
+     * `null` when the queue cannot tell.
+     */
+    private function jobStatus(?string $id): ?int
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        try {
+            return Craft::$app->getQueue()->status($id);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Takes a publish job out of the queue.
+     */
+    private function removeJob(string $id): void
+    {
+        $queue = Craft::$app->getQueue();
+        if (!$queue instanceof QueueInterface) {
+            return;
+        }
+
+        try {
+            $queue->release($id);
+        } catch (Throwable $e) {
+            Craft::warning("Could not remove job $id from the queue: {$e->getMessage()}", __METHOD__);
         }
     }
 
@@ -457,6 +665,8 @@ class Schedules extends Component
             'draft' => $entry,
             'schedule' => $schedule,
             'canEdit' => $error === null,
+            'canCancel' => $schedule !== null && $this->canUnschedule($entry, $user),
+            'note' => $error,
             'timeZone' => $timeZone->getName(),
             'publishAtLocal' => $schedule ? $this->localValue($schedule->publishAt, $timeZone) : null,
             'minLocal' => $this->localValue(new DateTime('+2 minutes'), $timeZone),
@@ -489,6 +699,30 @@ class Schedules extends Component
         }
 
         return $draft instanceof Entry ? $draft : null;
+    }
+
+    /**
+     * Runs the callback while holding the lock Craft uses for the live entry, so a
+     * schedule never changes while its draft is being published.
+     *
+     * @template T
+     * @param callable(): T $callback
+     * @return T
+     * @throws ScheduleException if the entry stays locked
+     */
+    private function withEntryLock(Entry $draft, callable $callback): mixed
+    {
+        $lockKey = 'element:' . $draft->getCanonicalId();
+        $mutex = Craft::$app->getMutex();
+        if (!$mutex->acquire($lockKey, 15)) {
+            throw new ScheduleException(Craft::t('datebook', 'This entry is being saved right now. Try again in a moment.'));
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $mutex->release($lockKey);
+        }
     }
 
     /**
@@ -547,9 +781,14 @@ class Schedules extends Component
      * content wherever it is enabled. Craft makes the same check across sites
      * before it applies a draft from the control panel.
      *
+     * With `$merge`, changes made to the live entry since the draft was made are
+     * brought into each copy first, in memory only. Elements::mergeCanonicalChanges()
+     * would save them, and that save fills an empty title with a placeholder such as
+     * "Entry 12", so a draft without a title would pass the check and go live with it.
+     *
      * @return string|null Why the draft is not valid, or null when it is
      */
-    private function validateDraft(Entry $draft): ?string
+    private function validateDraft(Entry $draft, bool $merge = false): ?string
     {
         /** @var Entry[] $siteDrafts */
         $siteDrafts = Entry::find()
@@ -569,6 +808,10 @@ class Schedules extends Component
 
         $errors = [];
         foreach ($toCheck as $siteDraft) {
+            if ($merge) {
+                $siteDraft->mergeCanonicalChanges();
+            }
+
             if ($siteDraft->enabled && $siteDraft->getEnabledForSite()) {
                 $siteDraft->setScenario(Element::SCENARIO_LIVE);
             }

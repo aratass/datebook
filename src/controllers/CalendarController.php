@@ -136,6 +136,8 @@ class CalendarController extends Controller
             'canSubscribe' => $feeds->canSubscribe($user),
             'jsConfig' => [
                 'today' => $today,
+                // Only used when the browser cannot work out the time in the time zone itself.
+                'now' => (new DateTime('now', $timeZone))->format('Y-m-d\TH:i'),
                 'timeZone' => $timeZone->getName(),
             ],
         ]);
