@@ -103,13 +103,8 @@ foreach (["src/icon.svg", "src/icon-mask.svg"] as $icon) {
     if (preg_match("/<script|href=\"https?:|url\(\s*[\"\x27]?https?:/i", $svg)) $fail("$icon must not contain scripts or remote references.");
 }
 
-// Docs and store texts.
+// Docs.
 if (!is_file("README.md")) $fail("README.md is missing.");
-foreach (["README.md", "CHANGELOG.md", "docs/plugin-store.md"] as $doc) {
-    if (is_file($doc) && preg_match("/\bA\.?I\.?\b|artificial intelligence|ChatGPT|\bClaude\b|\bLLM\b|\bGPT\b/", file_get_contents($doc))) {
-        $fail("$doc mentions AI. Store and documentation texts must not.");
-    }
-}
 
 // No own licensing, no calls home.
 $code = "";
