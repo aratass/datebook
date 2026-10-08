@@ -133,10 +133,17 @@ if ($errors) {
 echo "All Plugin Store checks passed for $name ($package, handle $handle).\n";
 '
 
-# In GitHub Actions the repository is public, so the URLs must answer.
+# In GitHub Actions the URLs must answer. Links into this repository can only answer
+# once it is public, so while it is private they are skipped (the Plugin Store needs
+# the repository public anyway, and the first run after that checks them).
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   for key in documentationUrl changelogUrl; do
     url=$("$php" -r 'echo json_decode(file_get_contents("composer.json"), true)["extra"]["'"$key"'"] ?? "";')
+    repo="${GITHUB_REPOSITORY:-}"
+    if [ "${REPO_PRIVATE:-}" = "true" ] && [[ "$url" == "https://github.com/$repo/"* || "$url" == "https://raw.githubusercontent.com/$repo/"* ]]; then
+      echo "skipped: $key $url (the repository is private; checked once it is public)"
+      continue
+    fi
     code=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 30 "$url" || true)
     if [ "$code" != "200" ]; then
       echo "FAIL: $key $url returned $code"

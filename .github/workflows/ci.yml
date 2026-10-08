@@ -98,6 +98,10 @@ jobs:
           if [ "${{ matrix.craft }}" = "lowest" ]; then
             lowest=$(php -r 'echo ltrim(json_decode(file_get_contents("../../composer.json"), true)["require"]["craftcms/cms"], "^");')
             composer require "craftcms/cms:$lowest" --no-update --no-interaction
+            # Composer 2.9 and later refuse versions with published security advisories,
+            # and the oldest supported Craft has some. This throwaway project only checks
+            # that the plugin still works on that version.
+            composer config audit.block-insecure false
           fi
           composer update --no-interaction --no-progress --prefer-dist
           composer show craftcms/cms | grep -E '^versions'
@@ -150,4 +154,6 @@ jobs:
         run: composer validate --strict --no-check-publish
 
       - name: Check the approval items
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
         run: ci/check-approval.sh
